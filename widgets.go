@@ -10,8 +10,13 @@ import (
 // overlay makes e cover its parent, over what comes before it.
 func overlay(e ui.Element) ui.Element { return e.Absolute().Top(0).Left(0).Right(0).Bottom(0) }
 
-func sectionTitle(c *ui.Context, s string) {
-	current.onBackdrop(c, ui.Text(c, s).FontSize(13).Bold(), true)
+// sectionTitle heads a group of settings: an icon and a title, on the
+// backdrop.
+func sectionTitle(c *ui.Context, svg *ui.SVG, s string) {
+	current.onBackdrop(c, ui.Row(c).Gap(6).AlignItems(ui.Center), true).Children(func() {
+		ui.Icon(c, svg).FontSize(14)
+		ui.Text(c, s).FontSize(13).Bold()
+	})
 }
 
 // group is a rounded panel of rows on glass, as System Settings draws them.
