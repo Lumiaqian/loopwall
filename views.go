@@ -177,11 +177,14 @@ func pageFrame(c *ui.Context, title, subtitle string, actions func(), body func(
 // scrollBody is a page's scrolling column, starting under the header.
 func scrollBody(c *ui.Context, top, maxWidth float32, fn func()) {
 	overlay(ui.Scroll(c)).ScrollbarInsets(top, 0, 0, 0).Children(func() {
-		col := ui.Column(c).FillWidth().Padding(top+14, 24, 28, 24).Gap(26)
-		if maxWidth > 0 {
-			col.MaxWidth(maxWidth)
+		if maxWidth == 0 {
+			ui.Column(c).FillWidth().Padding(top+14, 24, 28, 24).Gap(26).Children(fn)
+			return
 		}
-		col.Children(fn)
+		// Centered in the pane, as System Settings centers its column.
+		ui.Column(c).FillWidth().AlignItems(ui.Center).Padding(top+14, 24, 28, 24).Children(func() {
+			ui.Column(c).FillWidth().MaxWidth(maxWidth).Gap(26).Children(fn)
+		})
 	})
 }
 
@@ -305,7 +308,7 @@ func (a *application) playlistView(c *ui.Context) {
 			a.repairBanner(c)
 			// Displays.
 			ui.Column(c).Gap(10).FillWidth().Children(func() {
-				sectionTitle(c, "显示器")
+				sectionTitle(c, iconMonitor, "显示器")
 				if len(a.displays) == 0 {
 					ui.Text(c, "未检测到显示器").TextColor(t.TextMuted)
 				}
@@ -326,7 +329,7 @@ func (a *application) playlistView(c *ui.Context) {
 			})
 			// Advance rule.
 			ui.Column(c).Gap(10).FillWidth().Children(func() {
-				sectionTitle(c, "切换方式")
+				sectionTitle(c, iconRepeat, "切换方式")
 				group(c, func() {
 					groupRow(c, "切换时机", "", func() {
 						mode := 0
@@ -350,7 +353,7 @@ func (a *application) playlistView(c *ui.Context) {
 			})
 			// Order.
 			ui.Column(c).Gap(10).FillWidth().Children(func() {
-				sectionTitle(c, fmt.Sprintf("播放顺序 · %d", len(a.config.Playlist.VideoIDs)))
+				sectionTitle(c, iconList, fmt.Sprintf("播放顺序 · %d", len(a.config.Playlist.VideoIDs)))
 				if len(a.config.Playlist.VideoIDs) == 0 {
 					group(c, func() {
 						ui.Column(c).Padding(22).Gap(4).Center().FillWidth().Children(func() {
@@ -453,9 +456,9 @@ func (a *application) settingsView(c *ui.Context) {
 	pageFrame(c, "设置", "", nil, func(top float32) {
 		scrollBody(c, top, 720, func() {
 			ui.Column(c).Gap(10).FillWidth().Children(func() {
-				sectionTitle(c, "外观")
+				sectionTitle(c, iconPalette, "外观")
 				group(c, func() {
-					groupRow(c, "外观", "", func() {
+					groupRow(c, "模式", "", func() {
 						mode := max(0, slices.Index(appearances, a.prefs.Appearance))
 						if glassSegmented(c, &mode, "外观", false, "跟随系统", "浅色", "深色") {
 							a.prefs.Appearance = appearances[mode]
@@ -467,21 +470,17 @@ func (a *application) settingsView(c *ui.Context) {
 				})
 			})
 			ui.Column(c).Gap(10).FillWidth().Children(func() {
-				current.onBackdrop(c, ui.Row(c).Gap(6).AlignItems(ui.Center), true).Children(func() {
-					ui.Icon(c, iconDrop).FontSize(14)
-					sectionTitle(c, "液态玻璃")
-				})
+				sectionTitle(c, iconDrop, "液态玻璃")
 				group(c, func() {
-					for i := range looks {
-						if i > 0 {
-							ui.Divider(c)
+					ui.Row(c).Gap(12).Padding(12).FillWidth().AlignItems(ui.Stretch).Children(func() {
+						for i := range looks {
+							a.lookCard(c, &looks[i])
 						}
-						a.lookRow(c, &looks[i])
-					}
+					})
 				})
 			})
 			ui.Column(c).Gap(10).FillWidth().Children(func() {
-				sectionTitle(c, "通用")
+				sectionTitle(c, iconSettings, "通用")
 				group(c, func() {
 					groupRow(c, "接电锁屏时保持亮屏", "解锁、拔掉电源或停用本墙纸时自动释放，不改变系统密码要求。", func() {
 						if glassSwitch(c, &a.config.Playlist.KeepAwakeWhenLockedOnAC, "接电锁屏保持亮屏", a.busy) {
@@ -489,7 +488,7 @@ func (a *application) settingsView(c *ui.Context) {
 						}
 					})
 					ui.Divider(c)
-					groupRow(c, "登录时启动管理端", "关闭窗口后保留菜单栏图标；完全退出后壁纸仍由系统扩展继续播放。管理端在运行时，才能在墙纸服务卡住时自动修复。", func() {
+					groupRow(c, "登录时启动管理端", "常驻菜单栏，墙纸服务卡住时自动修复；完全退出也不影响壁纸播放。", func() {
 						if glassSwitch(c, &a.login, "登录启动", false) {
 							if e := mygo.App.SetOpenAtLogin(a.login); e != nil {
 								a.status = e.Error()
@@ -500,7 +499,7 @@ func (a *application) settingsView(c *ui.Context) {
 				})
 			})
 			ui.Column(c).Gap(10).FillWidth().Children(func() {
-				sectionTitle(c, "启用与资料库")
+				sectionTitle(c, iconFolder, "启用与资料库")
 				group(c, func() {
 					groupRow(c, "系统墙纸", "首次使用：在系统墙纸设置中选中「Phosphene Go 轮播」并应用到需要的显示器。", func() {
 						glassButton(c, iconExternal, "打开", false).OnClick(openWallpaperSettings)
@@ -541,40 +540,50 @@ func (a *application) accentSwatches(c *ui.Context) {
 	}
 }
 
-// lookRow offers a look: a preview of it, its name and what it does, and a
-// check on the one chosen.
-func (a *application) lookRow(c *ui.Context, l *look) {
+// lookCard offers a look, as System Settings offers its appearances: a
+// preview over the wallpaper now playing, its name, and what it does; the
+// one chosen is ringed in the accent and checked.
+func (a *application) lookCard(c *ui.Context, l *look) {
 	t := c.Theme()
-	row := ui.ButtonBase(c.Key("look-"+l.label)).FillWidth().Gap(14).Padding(10, 14).Label("液态玻璃：" + l.label)
-	if row.Hovered() {
-		row.Background(t.SurfaceHover)
+	chosen := l == current
+	card := ui.ButtonBase(c.Key("look-"+l.label)).Grow(1).Width(0).Padding(6, 6, 10, 6).Radius(14).Gap(8).
+		Label("液态玻璃：" + l.label)
+	card.Column().AlignItems(ui.Stretch).Justify(ui.Start)
+	if card.Hovered() && !chosen {
+		card.Background(t.SurfaceHover)
 	}
-	row.Children(func() {
-		a.lookPreview(c, l)
-		ui.Column(c).Gap(2).Grow(1).MinWidth(0).Children(func() {
-			ui.Text(c, l.label)
-			ui.Text(c, l.about).FontSize(11).TextColor(t.TextMuted)
-		})
-		if l == current {
-			ui.Icon(c, iconCheck).FontSize(16).TextColor(t.Accent)
+	card.Children(func() {
+		preview := a.lookPreview(c, l)
+		if chosen {
+			preview.Shadow(0, 0, 0, 2, t.Accent)
 		}
+		ui.Column(c).Gap(2).Padding(0, 4).Children(func() {
+			ui.Row(c).Gap(6).AlignItems(ui.Center).Children(func() {
+				name := ui.Text(c, l.label).FontWeight(600)
+				if chosen {
+					name.TextColor(t.Accent)
+					ui.Icon(c, iconCheck).FontSize(13).TextColor(t.Accent)
+				}
+			})
+			ui.Text(c, l.about).FontSize(11).TextColor(t.TextMuted).MaxLines(2)
+		})
 	})
-	if row.Clicked() && l != current {
+	if card.Clicked() && !chosen {
 		a.prefs.Glass = l.key
 		a.savePrefs()
 	}
 }
 
-// lookPreview draws a tiny window in look l, over the wallpaper now
+// lookPreview draws a small window in look l, over the wallpaper now
 // playing: a sidebar, two panes and a button in the accent.
-func (a *application) lookPreview(c *ui.Context, l *look) {
+func (a *application) lookPreview(c *ui.Context, l *look) ui.Element {
 	t := c.Theme()
-	ui.Box(c).Size(72, 46).Shrink(0).Radius(9).Clip().Border(1, t.Text.Alpha(0.12)).Children(func() {
-		a.backdrop(c, l, 0.12)
-		l.fillPane(c, ui.Box(c).Absolute().Top(3).Left(3).Bottom(3).Width(18).Radius(6))
-		l.fillPane(c, ui.Box(c).Absolute().Top(9).Left(25).Right(4).Height(14).Radius(5))
-		l.fillPane(c, ui.Box(c).Absolute().Top(26).Left(25).Right(4).Height(14).Radius(5))
-		l.fillControl(c, ui.Box(c).Absolute().Top(14).Right(8).Size(12, 5).Radius(3), glass.Glass{Tint: t.Accent})
+	return ui.Box(c).FillWidth().Height(96).Radius(10).Clip().Border(1, t.Text.Alpha(0.12)).Children(func() {
+		a.backdrop(c, l, 0.25)
+		l.fillPane(c, ui.Box(c).Absolute().Top(5).Left(5).Bottom(5).Width(34).Radius(9))
+		l.fillPane(c, ui.Box(c).Absolute().Top(14).Left(46).Right(7).Height(30).Radius(8))
+		l.fillPane(c, ui.Box(c).Absolute().Top(52).Left(46).Right(7).Height(30).Radius(8))
+		l.fillControl(c, ui.Box(c).Absolute().Top(24).Right(16).Size(20, 9).Radius(5), glass.Glass{Tint: t.Accent})
 	})
 }
 

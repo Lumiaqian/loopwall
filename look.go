@@ -20,9 +20,9 @@ type look struct {
 // The more glass, the more of the wallpaper the glass has to bend: its
 // refraction shows only over detail.
 var looks = []look{
-	{key: "none", label: "无", about: "纯色背景和实色面板，最清晰，也最省电。"},
-	{key: "", label: "标准", about: "透出模糊的壁纸，玻璃面板略带磨砂。", glass: true, blur: 32, tone: 0.38, pane: glass.Glass{Clarity: 0.3}},
-	{key: "max", label: "极致", about: "壁纸几乎清晰可见，面板接近透明，折射和高光最明显。", glass: true, blur: 16, tone: 0.26, pane: glass.Glass{Clarity: 0.7}},
+	{key: "none", label: "无", about: "纯色背景和面板，最清晰、最省电。"},
+	{key: "", label: "标准", about: "透出模糊的壁纸，面板略带磨砂。", glass: true, blur: 32, tone: 0.38, pane: glass.Glass{Clarity: 0.3}},
+	{key: "max", label: "极致", about: "壁纸清晰可见，折射和高光最明显。", glass: true, blur: 16, tone: 0.26, pane: glass.Glass{Clarity: 0.7}},
 }
 
 // current is the look of the frame being built; view sets it first. The
