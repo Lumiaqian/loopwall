@@ -118,16 +118,13 @@ func (a *application) sidebar(c *ui.Context) {
 		ui.Text(c, "Phosphene Go").FontSize(17).Bold()
 		ui.Text(c, "本地视频壁纸").FontSize(12).TextColor(t.TextMuted)
 	})
-	list := ui.Sidebar(c, &a.section, func() {
-		ui.SidebarItem(c, sectionLibrary, iconLibrary, "资料库").Children(func() {
-			ui.Badge(c, strconv.Itoa(len(a.config.Media)))
+	ui.Column(c).Grow(1).Children(func() {
+		glassNav(c, &a.section, []navItem{
+			{sectionLibrary, iconLibrary, "资料库", strconv.Itoa(len(a.config.Media))},
+			{sectionPlay, iconPlaylist, "播放与显示器", strconv.Itoa(len(a.config.Playlist.VideoIDs))},
+			{sectionSetting, iconSettings, "设置", ""},
 		})
-		ui.SidebarItem(c, sectionPlay, iconPlaylist, "播放与显示器").Children(func() {
-			ui.Badge(c, strconv.Itoa(len(a.config.Playlist.VideoIDs)))
-		})
-		ui.SidebarItem(c, sectionSetting, iconSettings, "设置")
-	}).Grow(1).Label("分区")
-	list.Background(ui.Transparent)
+	})
 	// Live state of each display, always in view.
 	ui.Column(c).Padding(12, 14, 16, 14).Gap(10).Children(func() {
 		ui.Text(c, "正在播放").FontSize(11).Bold().TextColor(t.TextMuted)
@@ -158,7 +155,11 @@ func pageFrame(c *ui.Context, title, subtitle string, actions func(), body func(
 	ui.Box(c).Fill().Children(func() {
 		body(headerHeight)
 		ui.Box(c).Absolute().Top(0).Left(0).Right(0).Height(headerHeight).PassThrough().
-			Material(glass.Blur{Radius: 10, Mask: &ui.LinearGradient{From: ui.RGB(0, 0, 0), To: ui.Transparent, Angle: 180, Start: 0.5, End: 1}})
+			Material(glass.Blur{Radius: 16, Mask: &ui.LinearGradient{From: ui.RGB(0, 0, 0), To: ui.Transparent, Angle: 180, Start: 0.55, End: 1}})
+		// The backdrop's tone over it, so what scrolls under the title fades
+		// out rather than shows through it, as a scroll edge does.
+		edge := current.edgeTone(c)
+		ui.Box(c).Absolute().Top(0).Left(0).Right(0).Height(headerHeight).PassThrough().Gradient(edge, edge.Alpha(0), 180)
 		ui.Row(c).Absolute().Top(0).Left(0).Right(0).Height(headerHeight).AlignItems(ui.Center).Gap(10).
 			Padding(0, bar.Right+20, 0, 24).DragWindow().Children(func() {
 			ui.Column(c).Gap(1).Grow(1).MinWidth(0).Children(func() {

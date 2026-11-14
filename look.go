@@ -93,6 +93,16 @@ func (m contentMaterial) PaintMaterial(p *ui.Painter, box ui.Rect, radii [4]floa
 	p.FillRadii(box, radii, tint)
 }
 
+// edgeTone is the color that content fades into under the page's title:
+// the backdrop's tone, or without glass the plain background.
+func (l *look) edgeTone(c *ui.Context) ui.Color {
+	t := c.Theme()
+	if !l.glass {
+		return solidBackground(t)
+	}
+	return pick(t, ui.RGBA(255, 255, 255, min(1, 1.6*l.tone)), ui.RGBA(0, 0, 0, min(1, 1.3*l.dark)))
+}
+
 // mediaGlass is the glass of a control over a thumbnail: clear, as Apple
 // sets glass over photos and video, dimmed so white text on it reads.
 var mediaGlass = glass.Glass{Style: glass.Clear, Tint: ui.RGBA(0, 0, 0, 0.28)}
