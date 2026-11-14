@@ -91,7 +91,7 @@ func (a *application) backdrop(c *ui.Context, l *look, scale float32) {
 	} else {
 		overlay(ui.Box(c)).Gradient(t.Accent.Alpha(0.35), t.Background, 135)
 	}
-	overlay(ui.Box(c)).Background(pick(t, ui.RGBA(255, 255, 255, 1.1*l.tone), ui.RGBA(0, 0, 0, l.tone)))
+	overlay(ui.Box(c)).Background(pick(t, ui.RGBA(255, 255, 255, 1.1*l.tone), ui.RGBA(0, 0, 0, l.dark)))
 }
 
 // ambientID is the video the backdrop shows: the one on the first display
@@ -234,15 +234,15 @@ func (a *application) mediaCard(c *ui.Context, m catalog.MediaEntry) {
 			}
 			if hovered {
 				overlay(ui.Box(c)).PassThrough().Center().Children(func() {
-					current.fillControl(c, ui.Box(c).Size(48, 48).Radius(24).Center(), glass.Glass{}).TextColor(t.Text).Children(func() {
-						ui.Icon(c, iconPlay).FontSize(18)
+					current.fillControl(c, ui.Box(c).Size(56, 56).Radius(28).Center(), mediaGlass).TextColor(ui.RGB(255, 255, 255)).Children(func() {
+						ui.Icon(c, iconPlay).FontSize(20)
 					})
 				})
 			}
 			if order >= 0 {
 				glassPill(c, fmt.Sprintf("#%d 轮播", order+1), glass.Glass{Tint: t.Accent}, t.AccentText).Absolute().Top(8).Left(8)
 			}
-			glassPill(c, clock(m.DurationSeconds), glass.Glass{}, t.Text).Absolute().Bottom(8).Right(8)
+			glassPill(c, clock(m.DurationSeconds), mediaGlass, ui.RGB(255, 255, 255)).Absolute().Bottom(8).Right(8)
 		})
 		ui.Row(c).Gap(6).AlignItems(ui.Center).Children(func() {
 			if a.selected == m.ID {
@@ -434,7 +434,7 @@ func (a *application) orderRow(c *ui.Context, i, n int, m catalog.MediaEntry) {
 func (a *application) displayCard(c *ui.Context, key, name string, builtIn bool) {
 	t := c.Theme()
 	s := a.displayState(key)
-	current.fillPane(c, ui.Row(c.Key("disp-"+key)).Gap(14).Padding(12).Radius(16).Width(340).Grow(1)).Children(func() {
+	current.fillContent(c, ui.Row(c.Key("disp-"+key)).Gap(14).Padding(12).Radius(16).Width(340).Grow(1)).Children(func() {
 		var bm *ui.Bitmap
 		if s.ok {
 			bm = a.thumbs[s.media.ID]
@@ -667,8 +667,8 @@ func (a *application) lookPreview(c *ui.Context, l *look) ui.Element {
 	return ui.Box(c).FillWidth().Height(96).Radius(10).Clip().Border(1, t.Text.Alpha(0.12)).Children(func() {
 		a.backdrop(c, l, 0.25)
 		l.fillPane(c, ui.Box(c).Absolute().Top(5).Left(5).Bottom(5).Width(34).Radius(9))
-		l.fillPane(c, ui.Box(c).Absolute().Top(14).Left(46).Right(7).Height(30).Radius(8))
-		l.fillPane(c, ui.Box(c).Absolute().Top(52).Left(46).Right(7).Height(30).Radius(8))
+		l.fillContent(c, ui.Box(c).Absolute().Top(14).Left(46).Right(7).Height(30).Radius(8))
+		l.fillContent(c, ui.Box(c).Absolute().Top(52).Left(46).Right(7).Height(30).Radius(8))
 		l.fillControl(c, ui.Box(c).Absolute().Top(24).Right(16).Size(20, 9).Radius(5), glass.Glass{Tint: t.Accent})
 	})
 }

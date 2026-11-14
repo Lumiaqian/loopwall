@@ -12,8 +12,13 @@ type look struct {
 	about      string
 	glass      bool        // false: a plain background and solid surfaces
 	blur       float32     // how much the backdrop blurs the wallpaper
-	tone       float32     // how far the backdrop fades toward the theme's background
-	pane       glass.Glass // the glass of large panes: the sidebar, groups, cards
+	tone, dark float32     // how far the backdrop fades toward the theme's background, light and dark
+	pane       glass.Glass // the glass of the sidebar, the one large pane of glass
+	// The content layer (groups, cards) is no glass, as Apple keeps Liquid
+	// Glass to the controls and navigation floating over content: a
+	// standard material, the backdrop blurred by contentBlur under the
+	// theme's background at content.
+	content, contentBlur float32
 }
 
 // looks are the choices of prefs.Glass, in the order the settings show them.
@@ -21,8 +26,8 @@ type look struct {
 // refraction shows only over detail.
 var looks = []look{
 	{key: "none", label: "无", about: "纯色背景和面板，最清晰、最省电。"},
-	{key: "", label: "标准", about: "透出模糊的壁纸，面板略带磨砂。", glass: true, blur: 32, tone: 0.38, pane: glass.Glass{Clarity: 0.3}},
-	{key: "max", label: "极致", about: "壁纸清晰可见，折射和高光最明显。", glass: true, blur: 16, tone: 0.26, pane: glass.Glass{Clarity: 0.7}},
+	{key: "", label: "标准", about: "模糊的壁纸作底，侧栏和按钮是玻璃。", glass: true, blur: 32, tone: 0.38, dark: 0.38, pane: glass.Glass{Clarity: 0.3}, content: 0.5},
+	{key: "max", label: "极致", about: "壁纸清晰可见，玻璃边缘的折射最明显。", glass: true, blur: 8, tone: 0.2, dark: 0.42, pane: glass.Glass{Clarity: 0.5}, content: 0.45, contentBlur: 24},
 }
 
 // current is the look of the frame being built; view sets it first. The
@@ -59,6 +64,38 @@ func (l *look) fillPane(c *ui.Context, e ui.Element) ui.Element {
 	t := c.Theme()
 	return e.Background(solidPane(t)).Border(1, t.Text.Alpha(0.06))
 }
+
+// fillContent fills a pane of the content layer, a group or a card: the
+// look's standard material, or a solid card.
+func (l *look) fillContent(c *ui.Context, e ui.Element) ui.Element {
+	t := c.Theme()
+	if !l.glass {
+		return l.fillPane(c, e)
+	}
+	return e.Material(contentMaterial{blur: l.contentBlur, tint: pick(t, ui.RGBA(255, 255, 255, l.content), ui.RGBA(28, 28, 30, l.content))}).
+		Border(1, t.Text.Alpha(0.07))
+}
+
+// contentMaterial is a standard material: what is under it blurred, if at
+// all, under a tint of the background; opaque with Reduce Transparency.
+type contentMaterial struct {
+	blur float32
+	tint ui.Color
+}
+
+func (m contentMaterial) PaintMaterial(p *ui.Painter, box ui.Rect, radii [4]float32) {
+	tint := m.tint
+	if p.Preferences().ReduceTransparency {
+		tint.A = 255
+	} else if m.blur > 0 {
+		glass.Blur{Radius: m.blur}.PaintMaterial(p, box, radii)
+	}
+	p.FillRadii(box, radii, tint)
+}
+
+// mediaGlass is the glass of a control over a thumbnail: clear, as Apple
+// sets glass over photos and video, dimmed so white text on it reads.
+var mediaGlass = glass.Glass{Style: glass.Clear, Tint: ui.RGBA(0, 0, 0, 0.28)}
 
 // fillControl fills a control with g, or without glass, with its tint or a
 // raised surface.

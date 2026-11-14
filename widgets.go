@@ -19,9 +19,10 @@ func sectionTitle(c *ui.Context, svg *ui.SVG, s string) {
 	})
 }
 
-// group is a rounded panel of rows on glass, as System Settings draws them.
+// group is a rounded panel of rows, as System Settings draws them, on the
+// content layer.
 func group(c *ui.Context, fn func()) {
-	current.fillPane(c, ui.Column(c).FillWidth().Radius(14)).Children(fn)
+	current.fillContent(c, ui.Column(c).FillWidth().Radius(14)).Children(fn)
 }
 
 func groupRow(c *ui.Context, title, detail string, control func()) {
