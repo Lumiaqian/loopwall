@@ -105,3 +105,30 @@ func TestGlassSegmented(t *testing.T) {
 	}
 	heldFrames(t, tt, &frames, ax, y)
 }
+
+// TestGlassNav checks that a click chooses a page, that Up and Down move
+// the choice while the navigation has the focus, and stop at its ends.
+func TestGlassNav(t *testing.T) {
+	section, changes := "a", 0
+	items := []navItem{{"a", iconLibrary, "甲", "1"}, {"b", iconPlaylist, "乙", ""}, {"c", iconSettings, "丙", ""}}
+	tt := ui.NewTester(func(c *ui.Context) {
+		if glassNav(c, &section, items) {
+			changes++
+		}
+	}, 240, 160)
+	if err := tt.Click("丙"); err != nil {
+		t.Fatal(err)
+	}
+	tt.Advance(time.Second)
+	if section != "c" || changes != 1 {
+		t.Fatalf("after a click: %q, %d changes", section, changes)
+	}
+	tt.Key(0, ui.KeyDown) // the last: stays
+	tt.Key(0, ui.KeyUp)
+	tt.Key(0, ui.KeyUp)
+	tt.Key(0, ui.KeyUp) // the first: stays
+	tt.Advance(time.Second)
+	if section != "a" || changes != 3 {
+		t.Fatalf("after the keys: %q, %d changes", section, changes)
+	}
+}
