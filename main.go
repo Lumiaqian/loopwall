@@ -42,6 +42,7 @@ type application struct {
 	preview       *ui.VideoPlayer
 	previewWindow *mygo.Window
 	prefs         prefs
+	share         *sharing // nil when sharing's state could not open
 	// Wallpaper recovery (recovery.go).
 	stuckSignals int64     // the extension's calls for help seen so far
 	stallSince   time.Time // when the displays began waiting, or the extension went silent
@@ -83,7 +84,9 @@ func main() {
 		app.login = mygo.App.OpenAtLogin()
 		if len(os.Args) > 2 && os.Args[1] == "--import" {
 			go func() {
-				imported, errs := app.importFiles(os.Args[2:])
+				added, errs := app.importFiles(os.Args[2:])
+				app.addMedia(added...)
+				imported := len(added)
 				if err := catalog.Save(app.root, &app.config); err != nil {
 					errs = append(errs, err.Error())
 				} else if err := app.host.NotifyLibraryChanged(); err != nil {
@@ -96,6 +99,7 @@ func main() {
 		}
 		app.loadThumbnails()
 		app.reapLater()
+		app.setupSharing()
 		tray, err := mygo.NewTray(mygo.TrayOptions{Icon: trayIcon(), IconIsTemplate: true, ToolTip: "Phosphene Go", Menu: mygo.NewMenu([]*mygo.MenuItem{
 			{Label: "打开资料库", Click: func(*mygo.MenuItem, *mygo.Window) { app.open() }},
 			{Label: "系统墙纸设置", Click: func(*mygo.MenuItem, *mygo.Window) { openWallpaperSettings() }},
@@ -114,7 +118,11 @@ func main() {
 				r, _ := catalog.ReadRuntime(app.root)
 				displays, err := app.host.Displays()
 				stuck, _ := app.host.AgentStuckSignals()
+				peers, browsing := app.findPeers()
 				mygo.RunOnMain(func() {
+					if browsing {
+						app.setPeers(peers)
+					}
 					app.runtime = r
 					app.observeWallpaper(r, stuck, time.Now())
 					if err == nil {
@@ -171,23 +179,38 @@ func (a *application) loadThumbnails() {
 		}
 	}
 }
-func (a *application) importFiles(paths []string) (int, []string) {
-	count := 0
+
+// probe reads a video's size, rate and length and writes its thumbnail,
+// for catalog.Import and catalog.ImportFrom.
+func (a *application) probe(ctx context.Context, path, thumb string) (catalog.MediaEntry, error) {
+	info, e := a.host.Probe(ctx, path, thumb)
+	return catalog.MediaEntry{Width: info.Width, Height: info.Height, DurationSeconds: info.Duration, FrameRate: info.FrameRate}, e
+}
+
+// importFiles imports paths into the library's files, off the main thread:
+// it reads only the host and the root, and returns the entries for
+// addMedia to add.
+func (a *application) importFiles(paths []string) ([]catalog.MediaEntry, []string) {
+	var added []catalog.MediaEntry
 	errs := []string{}
 	for _, path := range paths {
-		m, e := catalog.Import(context.Background(), a.root, path, func(ctx context.Context, path, thumb string) (catalog.MediaEntry, error) {
-			info, e := a.host.Probe(ctx, path, thumb)
-			return catalog.MediaEntry{Width: info.Width, Height: info.Height, DurationSeconds: info.Duration, FrameRate: info.FrameRate}, e
-		})
+		m, e := catalog.Import(context.Background(), a.root, path, a.probe)
 		if e != nil {
 			errs = append(errs, filepath.Base(path)+"："+e.Error())
 			continue
 		}
+		added = append(added, m)
+	}
+	return added, errs
+}
+
+// addMedia adds imported videos to the library and the end of the
+// playlist, unsaved.
+func (a *application) addMedia(entries ...catalog.MediaEntry) {
+	for _, m := range entries {
 		a.config.Media = append(a.config.Media, m)
 		a.config.Playlist.VideoIDs = append(a.config.Playlist.VideoIDs, m.ID)
-		count++
 	}
-	return count, errs
 }
 func (a *application) chooseImport() {
 	if a.busy {
@@ -211,25 +234,22 @@ func (a *application) chooseImport() {
 			})
 			return
 		}
-		// Work against a private configuration; the UI never reads partially imported state.
-		var worker application
 		mygo.RunOnMain(func() {
-			worker = application{host: a.host, root: a.root, config: a.config}
-			worker.config.Media = slices.Clone(a.config.Media)
-			worker.config.Playlist.VideoIDs = slices.Clone(a.config.Playlist.VideoIDs)
 			a.status = "正在复制并验证视频…"
 			if a.window != nil {
 				a.window.Invalidate()
 			}
 		})
-		n, errs := worker.importFiles(paths)
+		// The library changes only on the main thread, by what was added:
+		// what changed it meanwhile, as a download, stays.
+		added, errs := a.importFiles(paths)
 		mygo.RunOnMain(func() {
-			a.config = worker.config
+			a.addMedia(added...)
 			a.busy = false
 			saved := a.save()
 			a.loadThumbnails()
 			if saved {
-				a.status = fmt.Sprintf("已导入 %d 个视频", n)
+				a.status = fmt.Sprintf("已导入 %d 个视频", len(added))
 				if len(errs) > 0 {
 					a.status += "；" + strings.Join(errs, "；")
 				}

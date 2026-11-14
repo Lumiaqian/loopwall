@@ -17,6 +17,10 @@ func (h *fakeHost) Probe(context.Context, string, string) (platform.MediaInfo, e
 func (h *fakeHost) Displays() ([]platform.DisplayInfo, error) { return nil, nil }
 func (h *fakeHost) NotifyLibraryChanged() error               { h.notices++; return nil }
 func (h *fakeHost) AgentStuckSignals() (int64, error)         { return 0, nil }
+func (h *fakeHost) ComputerName() (string, error)             { return "测试机", nil }
+func (h *fakeHost) Advertise(string, int64, string) error     { return nil }
+func (h *fakeHost) StopAdvertising() error                    { return nil }
+func (h *fakeHost) Peers() ([]platform.Peer, error)           { return nil, nil }
 
 func TestPinDisplays(t *testing.T) {
 	root, host := t.TempDir(), &fakeHost{}

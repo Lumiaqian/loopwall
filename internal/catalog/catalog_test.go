@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
 	"os"
 	"path/filepath"
 	"testing"
@@ -155,5 +156,47 @@ func TestCleanupCannotDeleteUnpublishedImport(t *testing.T) {
 	}
 	if _, e := os.Stat(dir); e != nil {
 		t.Fatal("cleanup deleted an unpublished import")
+	}
+}
+
+// TestImportFrom checks that a video written into the import, as a
+// download is, is published under the name given once it probes as valid,
+// and that a failed write or probe leaves nothing behind.
+func TestImportFrom(t *testing.T) {
+	root := t.TempDir()
+	write := func(w io.Writer) error { _, err := w.Write([]byte("video")); return err }
+	probe := func(_ context.Context, path, thumb string) (MediaEntry, error) {
+		if b, err := os.ReadFile(path); err != nil || string(b) != "video" {
+			t.Errorf("probed %q: %v", b, err)
+		}
+		return MediaEntry{Width: 1920, Height: 1080, DurationSeconds: 8, FrameRate: 30}, os.WriteFile(thumb, []byte("jpeg"), 0600)
+	}
+	m, err := ImportFrom(context.Background(), root, "远方的海", ".MOV", write, probe)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if m.Name != "远方的海" || m.Filename != "video.mov" {
+		t.Errorf("imported %+v", m)
+	}
+	if b, err := os.ReadFile(VideoPath(root, m)); err != nil || string(b) != "video" {
+		t.Errorf("published %q: %v", b, err)
+	}
+
+	failed := errors.New("connection reset")
+	if _, err = ImportFrom(context.Background(), root, "x", ".mp4", func(io.Writer) error { return failed }, probe); !errors.Is(err, failed) {
+		t.Errorf("a failed write: %v", err)
+	}
+	bad := func(context.Context, string, string) (MediaEntry, error) {
+		return MediaEntry{}, errors.New("not a video")
+	}
+	if _, err = ImportFrom(context.Background(), root, "x", ".mp4", write, bad); err == nil {
+		t.Error("an invalid video was imported")
+	}
+	if _, err = ImportFrom(context.Background(), root, "x", ".exe", write, probe); err == nil {
+		t.Error("an .exe was imported")
+	}
+	entries, _ := os.ReadDir(filepath.Join(root, "videos"))
+	if len(entries) != 1 || entries[0].Name() != m.ID {
+		t.Errorf("left in videos: %v", entries)
 	}
 }
