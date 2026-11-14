@@ -1,5 +1,7 @@
 # Loopwall
 
+[![Build](https://github.com/Lumiaqian/loopwall/actions/workflows/build.yml/badge.svg)](https://github.com/Lumiaqian/loopwall/actions/workflows/build.yml)
+
 本地视频动态壁纸应用。使用 **MyGO v0.9.0 的 Go 原生界面**管理资料库，由独立的 **Swift 墙纸扩展**播放。基于 [Phosphene v1.11.4](https://github.com/kageroumado/phosphene/tree/v1.11.4)，保留原 MIT 版权声明。
 
 面向 Apple Silicon、macOS 26+ 的个人使用。当前实机环境为 macOS 27.0.1；哪些行为已在真机确认、哪些还没有，见 [真机验证状态](docs/VALIDATION.md)。
@@ -14,6 +16,10 @@
 壁纸始终静音，保留导入视频的画质。关闭管理窗口后保留菜单栏，完全退出管理端后壁纸继续由系统扩展播放。设置页可启用登录启动。
 
 “接电锁屏时保持亮屏”默认开启，仅在本墙纸实际启用、接电且锁屏时持有电源请求；解锁、拔电、停用墙纸或关闭选项后释放。系统密码要求不受影响。
+
+## 下载
+
+[Releases](https://github.com/Lumiaqian/loopwall/releases) 里是 GitHub Actions 构建的 Apple Silicon 安装包；每次推送的构建产物也可在 Actions 页面下载。它与本地构建一样只做 ad-hoc 签名、未经公证：解压后把 `Loopwall.app` 放进「应用程序」，首次打开若被拦截，到「系统设置 → 隐私与安全性」点「仍要打开」，然后在系统墙纸设置里选择「Loopwall 轮播」。
 
 ## 构建和安装
 
@@ -66,7 +72,7 @@ open -n -W "$HOME/Applications/Loopwall.app" --args --import "/absolute/path/vid
 ## 检查
 
 ```sh
-scripts/test.sh                         # Go race tests、Swift 轮播/状态/尺寸测试、JSON 双向互读、go vet
+scripts/test.sh                         # 全部 Go race tests、Swift 轮播/状态/尺寸测试、JSON 双向互读、go vet
 go tool mygo native check internal/platform
 swiftformat --lint .
 swiftlint lint LoopwallExtension internal/platform/swift/Sources/Platform/Platform.swift tests/main.swift
