@@ -46,6 +46,7 @@ open -n -W "$HOME/Applications/Loopwall.app" --args --import "/absolute/path/vid
 - `internal/catalog`：Go 管理的资料库、导入、原子配置发布与删除清理。
 - `internal/platform`：Swift 原生媒体探测、缩略图、稳定显示器标识与变更通知。桥接代码由 MyGO 生成。
 - `LoopwallExtension`：系统接入、原生解码、独立轮播、锁屏亮屏及尺寸恢复。
+- [设计系统](docs/design/README.md)：界面文案、Liquid Glass 分层、颜色与字体 token、组件规范；`design_test.go` 校验 token 与代码一致。
 - [跨语言契约与播放状态](docs/ARCHITECTURE.md)、[使用及回退](docs/USAGE.md)、[实机验收记录](docs/VALIDATION.md)。
 
 身份为 `local.lumiaqian.loopwall` 和 `local.lumiaqian.loopwall.extension`。数据位于：
