@@ -38,7 +38,17 @@ func (a *application) view(c *ui.Context) {
 		c.Toast(a.status)
 		a.status = ""
 	}
-	ui.Box(c).Fill().Clip().Children(func() {
+	// The whole window takes videos and folders dragged from Finder.
+	root := ui.Box(c).Fill().Clip()
+	if files := root.DroppedFiles(); files != nil {
+		a.importPaths(files)
+	}
+	var over float32
+	if root.FileDragOver() {
+		over = 1
+	}
+	hint := root.AnimateTo("drop-hint", over, ui.Smooth)
+	root.Children(func() {
 		a.backdrop(c, current, 1)
 		overlay(ui.Row(c)).AlignItems(ui.Stretch).Children(func() {
 			// The sidebar floats as a pane of Liquid Glass over the backdrop.
@@ -57,7 +67,26 @@ func (a *application) view(c *ui.Context) {
 				}
 			})
 		})
+		dropHint(c, hint)
 		glassToasts(c)
+	})
+}
+
+// dropHint shows, as files are dragged over the window, that letting go
+// imports them: the window dims and a pane of glass says so, by k, from 0
+// to 1 as the files come over it.
+func dropHint(c *ui.Context, k float32) {
+	t := c.Theme()
+	if k < 0.01 {
+		return
+	}
+	overlay(ui.Box(c)).PassThrough().Background(ui.RGBA(0, 0, 0, 0.22*k)).Center().Children(func() {
+		pane := ui.Column(c).Gap(10).Padding(28, 40).Radius(28).AlignItems(ui.Center).Opacity(k).Scale(0.94+0.06*k, 0.94+0.06*k)
+		current.fillControl(c, pane, glass.Glass{}).InsetShadow(0, 0, 0, 2, t.Accent.Alpha(0.6)).Children(func() {
+			ui.Icon(c, iconImport).FontSize(34).TextColor(t.Accent)
+			ui.Text(c, "松开以导入到资料库").FontSize(17).Bold()
+			ui.Text(c, "支持 MP4、MOV、M4V；文件夹会导入其中的全部视频").FontSize(12).TextColor(t.TextMuted)
+		})
 	})
 }
 
@@ -209,7 +238,7 @@ func (a *application) libraryView(c *ui.Context) {
 		glassButton(c, iconImport, label, true).Disabled(a.busy).OnClick(a.chooseImport)
 	}, func(top float32) {
 		if len(a.config.Media) == 0 {
-			emptyState(c, iconFilm, "还没有视频", "点右上角「导入视频」添加 MP4、MOV 或 M4V，原画质复制，不重新编码。")
+			emptyState(c, iconFilm, "还没有视频", "把视频或文件夹拖到这里，或点右上角「导入视频」。支持 MP4、MOV、M4V，原画质复制，不重新编码。")
 			return
 		}
 		a.grid.Key = func(i int) any { return a.config.Media[i].ID }

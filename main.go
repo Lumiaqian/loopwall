@@ -7,6 +7,7 @@ import (
 	"image"
 	"image/color"
 	"image/png"
+	"io/fs"
 	"log"
 	"maps"
 	"os"
@@ -84,7 +85,8 @@ func main() {
 		app.login = mygo.App.OpenAtLogin()
 		if len(os.Args) > 2 && os.Args[1] == "--import" {
 			go func() {
-				added, errs := app.importFiles(os.Args[2:])
+				videos, _ := videoFiles(os.Args[2:], app.root)
+				added, errs := app.importFiles(videos)
 				app.addMedia(added...)
 				imported := len(added)
 				if err := catalog.Save(app.root, &app.config); err != nil {
@@ -221,28 +223,40 @@ func (a *application) chooseImport() {
 	parent := a.window
 	go func() {
 		paths, err := mygo.Dialog.Open(mygo.OpenDialogOptions{Parent: parent, Title: "导入视频壁纸", Multiple: true, Filters: []mygo.FileFilter{{Name: "视频", Extensions: []string{"mp4", "mov", "m4v"}}}})
-		if err != nil || len(paths) == 0 {
-			mygo.RunOnMain(func() {
-				a.busy = false
-				a.status = "已取消导入"
-				if err != nil {
-					a.status = err.Error()
-				}
-				if a.window != nil {
-					a.window.Invalidate()
-				}
-			})
-			return
-		}
 		mygo.RunOnMain(func() {
-			a.status = "正在复制并验证视频…"
-			if a.window != nil {
-				a.window.Invalidate()
+			a.busy = false
+			switch {
+			case err != nil:
+				a.status = err.Error()
+			case len(paths) == 0:
+				a.status = "已取消导入"
+			default:
+				a.importPaths(paths)
 			}
+			a.invalidate()
 		})
+	}()
+}
+
+// importPaths imports the videos among paths, chosen or dropped, and in
+// the folders among them, in the background. On the main thread.
+func (a *application) importPaths(paths []string) {
+	if a.busy {
+		a.status = "正在处理上一批，请稍后再导入"
+		return
+	}
+	videos, skipped := videoFiles(paths, a.root)
+	if len(videos) == 0 {
+		a.status = "没有可导入的视频（支持 MP4、MOV、M4V）"
+		return
+	}
+	a.busy = true
+	a.section = sectionLibrary
+	a.status = fmt.Sprintf("正在复制并验证 %d 个视频…", len(videos))
+	go func() {
 		// The library changes only on the main thread, by what was added:
 		// what changed it meanwhile, as a download, stays.
-		added, errs := a.importFiles(paths)
+		added, errs := a.importFiles(videos)
 		mygo.RunOnMain(func() {
 			a.addMedia(added...)
 			a.busy = false
@@ -250,16 +264,70 @@ func (a *application) chooseImport() {
 			a.loadThumbnails()
 			if saved {
 				a.status = fmt.Sprintf("已导入 %d 个视频", len(added))
+				if skipped > 0 {
+					a.status += fmt.Sprintf("，跳过 %d 个非视频文件", skipped)
+				}
 				if len(errs) > 0 {
 					a.status += "；" + strings.Join(errs, "；")
 				}
 			}
-			if a.window != nil {
-				a.window.Invalidate()
-			}
+			a.invalidate()
 		})
 	}()
 }
+
+// videoFiles expands paths into the videos to import: those of a video's
+// extension, and those in the folders, at any depth, hidden ones left
+// out, each once, in order. It counts the other files as skipped. What is
+// in the library is left out, so dropping it on itself imports nothing.
+func videoFiles(paths []string, library string) (videos []string, skipped int) {
+	seen := map[string]bool{}
+	inLibrary := func(p string) bool {
+		return library != "" && (p == library || strings.HasPrefix(p, library+string(filepath.Separator)))
+	}
+	add := func(p string) {
+		switch {
+		case inLibrary(p) || seen[p]:
+		case slices.Contains([]string{".mp4", ".mov", ".m4v"}, strings.ToLower(filepath.Ext(p))):
+			seen[p] = true
+			videos = append(videos, p)
+		default:
+			skipped++
+		}
+	}
+	for _, root := range paths {
+		root = filepath.Clean(root)
+		info, err := os.Stat(root)
+		if err != nil {
+			skipped++
+			continue
+		}
+		if !info.IsDir() {
+			add(root)
+			continue
+		}
+		_ = filepath.WalkDir(root, func(p string, d fs.DirEntry, err error) error {
+			switch {
+			case err != nil:
+				return nil // unreadable: leave it out
+			case p != root && strings.HasPrefix(d.Name(), "."):
+				if d.IsDir() {
+					return filepath.SkipDir
+				}
+				return nil
+			case d.IsDir():
+				if inLibrary(p) {
+					return filepath.SkipDir
+				}
+				return nil
+			}
+			add(p)
+			return nil
+		})
+	}
+	return videos, skipped
+}
+
 func (a *application) entry(id string) (catalog.MediaEntry, bool) {
 	for _, m := range a.config.Media {
 		if m.ID == id {
