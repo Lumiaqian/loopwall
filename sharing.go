@@ -1,0 +1,368 @@
+package main
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"io"
+	"net"
+	"os"
+	"path/filepath"
+	"slices"
+	"strings"
+	"sync/atomic"
+	"syscall"
+	"time"
+
+	"github.com/Lumiaqian/phosphene-go/internal/catalog"
+	"github.com/Lumiaqian/phosphene-go/internal/share"
+	"github.com/egoist/mygo"
+	"github.com/egoist/mygo/ui"
+)
+
+// sharing is the app's side of sharing libraries on the local network
+// (internal/share): this Mac's server, while prefs.Share is on, and the
+// Macs it finds and pulls copies of videos from. Its fields change on the
+// main thread only.
+type sharing struct {
+	store  *share.Store
+	server *share.Server
+	client *share.Client
+	name   string // this Mac's name on the network
+	err    string // why sharing could not start, if it could not
+
+	// browsing is read by the ticker, off the main thread.
+	browsing atomic.Bool
+	peers    []share.Peer          // the Macs found, this one left out
+	remotes  map[string]*remote    // what each peer shares, by its device
+	pulls    map[string]*pull      // downloads, by "device/id"
+	codes    map[string]*string    // pairing codes being typed, by device
+	pairing  map[string]bool       // pairings under way, by device
+	thumbs   map[string]*ui.Bitmap // peers' thumbnails, by "device/id"
+}
+
+// remote is what a peer shares, as last listed.
+type remote struct {
+	items   []share.Item
+	err     error
+	loading bool
+}
+
+// pull is a video being downloaded from a peer.
+type pull struct {
+	done, total int64
+	err         string
+	cancel      context.CancelFunc
+}
+
+// setupSharing opens sharing's state beside the settings and starts
+// sharing if it was on. Without it, the app works as before.
+func (a *application) setupSharing() {
+	path, err := prefsPath()
+	var st *share.Store
+	if err == nil {
+		st, err = share.OpenStore(filepath.Dir(path))
+	}
+	if err != nil {
+		a.status = "局域网共享不可用：" + err.Error()
+		return
+	}
+	name, _ := a.host.ComputerName()
+	if strings.TrimSpace(name) == "" {
+		name = "Mac"
+	}
+	a.share = &sharing{store: st, server: share.NewServer(a.root, st), client: share.NewClient(st, name), name: name,
+		remotes: map[string]*remote{}, pulls: map[string]*pull{}, codes: map[string]*string{}, pairing: map[string]bool{},
+		thumbs: map[string]*ui.Bitmap{}}
+	if a.prefs.Share {
+		a.startSharing()
+	}
+}
+
+// startSharing serves the library and advertises it.
+func (a *application) startSharing() {
+	s := a.share
+	if s == nil || s.server.Port() != 0 {
+		return
+	}
+	s.err = ""
+	port, err := s.server.Start(":0")
+	if err == nil {
+		if err = a.host.Advertise(s.name, int64(port), s.store.Device()); err != nil {
+			_ = s.server.Stop()
+		}
+	}
+	if err != nil {
+		s.err = err.Error()
+	}
+}
+
+func (a *application) stopSharing() {
+	s := a.share
+	if s == nil {
+		return
+	}
+	_ = a.host.StopAdvertising()
+	_ = s.server.Stop()
+	s.err = ""
+}
+
+// setSharing turns sharing this library on or off, and remembers it.
+func (a *application) setSharing(on bool) {
+	a.prefs.Share = on
+	a.savePrefs()
+	if on {
+		a.share.server.NewCode()
+		a.startSharing()
+	} else {
+		a.stopSharing()
+	}
+}
+
+// findPeers is the ticker's: while browsing, the Macs found, without this
+// one. Off the main thread: it reads only what is safe there.
+func (a *application) findPeers() ([]share.Peer, bool) {
+	if a.share == nil || !a.share.browsing.Load() {
+		return nil, false
+	}
+	self := a.share.store.Device()
+	found, err := a.host.Peers()
+	if err != nil {
+		return nil, false
+	}
+	var peers []share.Peer
+	for _, p := range found {
+		if p.Device != "" && p.Device != self {
+			peers = append(peers, share.Peer{Name: p.Name, Device: p.Device, Addr: share.Addr(p.Host, p.Port)})
+		}
+	}
+	return peers, true
+}
+
+// setPeers takes the Macs found, listing what the paired ones share the
+// first time they show up.
+func (a *application) setPeers(peers []share.Peer) {
+	s := a.share
+	s.peers = peers
+	for _, p := range peers {
+		if _, paired := s.store.Paired(p.Device); paired && s.remotes[p.Device] == nil {
+			a.listRemote(p)
+		}
+	}
+}
+
+// browse starts looking for Macs, which asks for the local network the
+// first time.
+func (a *application) browse() {
+	s := a.share
+	if s == nil || s.browsing.Load() {
+		return
+	}
+	s.browsing.Store(true)
+	go func() {
+		peers, ok := a.findPeers()
+		mygo.RunOnMain(func() {
+			if ok {
+				a.setPeers(peers)
+			}
+			a.invalidate()
+		})
+	}()
+}
+
+// listRemote lists what peer shares, then fetches the thumbnails missing.
+func (a *application) listRemote(p share.Peer) {
+	s := a.share
+	r := s.remotes[p.Device]
+	if r == nil {
+		r = &remote{}
+		s.remotes[p.Device] = r
+	}
+	if r.loading {
+		return
+	}
+	r.loading = true
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+		items, err := s.client.Library(ctx, p)
+		mygo.RunOnMain(func() {
+			r.items, r.err, r.loading = items, err, false
+			a.invalidate()
+		})
+		for _, it := range items {
+			key := p.Device + "/" + it.ID
+			b, err := s.client.Thumbnail(ctx, p, it.ID)
+			if err != nil {
+				continue
+			}
+			bm, err := ui.DecodeBitmap(b)
+			if err != nil {
+				continue
+			}
+			mygo.RunOnMain(func() {
+				s.thumbs[key] = bm
+				a.invalidate()
+			})
+		}
+	}()
+}
+
+// pair pairs with p by the code typed for it.
+func (a *application) pair(p share.Peer) {
+	s := a.share
+	code := strings.ReplaceAll(strings.TrimSpace(*s.code(p.Device)), " ", "")
+	if code == "" || s.pairing[p.Device] {
+		return
+	}
+	s.pairing[p.Device] = true
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+		defer cancel()
+		err := s.client.Pair(ctx, p, code)
+		mygo.RunOnMain(func() {
+			s.pairing[p.Device] = false
+			if err != nil {
+				a.status = "配对失败：" + err.Error()
+			} else {
+				*s.code(p.Device) = ""
+				a.status = "已与「" + p.Name + "」配对"
+				delete(s.remotes, p.Device)
+				a.listRemote(p)
+			}
+			a.invalidate()
+		})
+	}()
+}
+
+// code is the pairing code being typed for device, which a text input
+// edits in place.
+func (s *sharing) code(device string) *string {
+	if s.codes[device] == nil {
+		s.codes[device] = new(string)
+	}
+	return s.codes[device]
+}
+
+// unpair forgets p.
+func (a *application) unpair(p share.Peer) {
+	s := a.share
+	if err := s.store.Unpair(p.Device); err != nil {
+		a.status = err.Error()
+		return
+	}
+	delete(s.remotes, p.Device)
+}
+
+// pulled is the local copy of p's video id, if one was pulled and is
+// still in the library.
+func (a *application) pulled(p share.Peer, id string) (catalog.MediaEntry, bool) {
+	local, ok := a.share.store.Imported(p.Device, id)
+	if !ok {
+		return catalog.MediaEntry{}, false
+	}
+	return a.entry(local)
+}
+
+// pullVideo downloads p's video it into the library, as an import does a
+// file, and adds it to the end of the playlist.
+func (a *application) pullVideo(p share.Peer, it share.Item) {
+	s := a.share
+	key := p.Device + "/" + it.ID
+	if pl := s.pulls[key]; pl != nil && pl.err == "" {
+		return
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	pl := &pull{total: it.Size, cancel: cancel}
+	s.pulls[key] = pl
+	go func() {
+		defer cancel()
+		var shown time.Time
+		m, err := catalog.ImportFrom(ctx, a.root, it.Name, it.Ext, func(w io.Writer) error {
+			return s.client.Download(ctx, p, it.ID, w, func(done, total int64) {
+				if time.Since(shown) < 150*time.Millisecond && done != total {
+					return
+				}
+				shown = time.Now()
+				mygo.RunOnMain(func() {
+					pl.done, pl.total = done, total
+					a.invalidate()
+				})
+			})
+		}, a.probe)
+		// Read before the deferred cancel: a failure is not a cancellation.
+		cancelled := errors.Is(ctx.Err(), context.Canceled)
+		mygo.RunOnMain(func() {
+			defer a.invalidate()
+			switch {
+			case cancelled && err != nil:
+				delete(s.pulls, key)
+				return
+			case err != nil:
+				pl.err = friendly(err)
+				return
+			}
+			delete(s.pulls, key)
+			a.addMedia(m)
+			if !a.save() {
+				return
+			}
+			if err := s.store.RecordImport(p.Device, it.ID, m.ID); err != nil {
+				a.status = err.Error()
+				return
+			}
+			if b, err := os.ReadFile(catalog.ThumbnailPath(a.root, m)); err == nil {
+				a.thumbs[m.ID], _ = ui.DecodeBitmap(b)
+			}
+			a.status = "已导入「" + m.Name + "」，并加入轮播"
+		})
+	}()
+}
+
+// friendly words an error of sharing for the user: the network's own,
+// as a refused or timed out connection, say what likely happened.
+func friendly(err error) string {
+	var netErr net.Error
+	switch {
+	case errors.Is(err, share.ErrNotPaired), errors.Is(err, share.ErrWrongCode), errors.Is(err, share.ErrChangedCertificate):
+		return err.Error()
+	case errors.Is(err, context.DeadlineExceeded), errors.As(err, &netErr) && netErr.Timeout():
+		return "连接超时：对方可能已休眠或离开了这个网络"
+	case errors.Is(err, syscall.ECONNREFUSED):
+		return "连接被拒绝：对方可能已关闭共享"
+	case errors.Is(err, io.ErrUnexpectedEOF), errors.Is(err, syscall.ECONNRESET):
+		return "连接中断了，请重试"
+	case errors.As(err, &netErr):
+		return "连不上对方：" + err.Error()
+	}
+	return err.Error()
+}
+
+func (a *application) invalidate() {
+	if a.window != nil {
+		a.window.Invalidate()
+	}
+}
+
+// sizeText is a file's size, as Finder writes it.
+func sizeText(n int64) string {
+	switch {
+	case n >= 1e9:
+		return fmt.Sprintf("%.1f GB", float64(n)/1e9)
+	case n >= 1e6:
+		return fmt.Sprintf("%.0f MB", float64(n)/1e6)
+	default:
+		return fmt.Sprintf("%.0f KB", float64(n)/1e3)
+	}
+}
+
+// grantedDevices is who may pull from this Mac, by name, oldest first.
+func (s *sharing) grantedDevices() []string {
+	granted := s.store.Granted()
+	devices := make([]string, 0, len(granted))
+	for d := range granted {
+		devices = append(devices, d)
+	}
+	slices.SortFunc(devices, func(x, y string) int { return int(granted[x].PairedAt - granted[y].PairedAt) })
+	return devices
+}

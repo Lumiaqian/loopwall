@@ -195,8 +195,26 @@ func ThumbnailPath(root string, m MediaEntry) string {
 type Probe func(context.Context, string, string) (MediaEntry, error)
 
 // Import copies first, then probes the copy. Only a fully validated file becomes visible.
-func Import(ctx context.Context, root, source string, probe Probe) (entry MediaEntry, err error) {
+func Import(ctx context.Context, root, source string, probe Probe) (MediaEntry, error) {
 	ext := strings.ToLower(filepath.Ext(source))
+	name := strings.TrimSuffix(filepath.Base(source), filepath.Ext(source))
+	return ImportFrom(ctx, root, name, ext, func(w io.Writer) error {
+		in, err := os.Open(source)
+		if err != nil {
+			return err
+		}
+		defer in.Close()
+		_, err = io.Copy(w, in)
+		return err
+	}, probe)
+}
+
+// ImportFrom imports the video that write writes, as a file of extension
+// ext named name, as Import does a file: written in a staging directory,
+// probed there, and published only once valid. A download writes into it
+// directly rather than into a copy of its own.
+func ImportFrom(ctx context.Context, root, name, ext string, write func(io.Writer) error, probe Probe) (entry MediaEntry, err error) {
+	ext = strings.ToLower(ext)
 	if !slices.Contains([]string{".mp4", ".mov", ".m4v"}, ext) {
 		return entry, errors.New("仅支持 MP4、MOV 和 M4V")
 	}
@@ -209,16 +227,11 @@ func Import(ctx context.Context, root, source string, probe Probe) (entry MediaE
 		return entry, err
 	}
 	defer os.RemoveAll(stage)
-	in, err := os.Open(source)
-	if err != nil {
-		return entry, err
-	}
-	defer in.Close()
 	out, err := os.Create(filepath.Join(stage, "video"+ext))
 	if err != nil {
 		return entry, err
 	}
-	_, err = io.Copy(out, in)
+	err = write(out)
 	closeErr := out.Close()
 	if err != nil {
 		return entry, err
@@ -237,7 +250,7 @@ func Import(ctx context.Context, root, source string, probe Probe) (entry MediaE
 	id[6] = (id[6] & 0x0f) | 0x40
 	id[8] = (id[8] & 0x3f) | 0x80
 	entry.ID = fmt.Sprintf("%x-%x-%x-%x-%x", id[:4], id[4:6], id[6:8], id[8:10], id[10:])
-	entry.Name = strings.TrimSuffix(filepath.Base(source), filepath.Ext(source))
+	entry.Name = name
 	entry.Filename = "video" + ext
 	entry.AddedAtUnix = float64(time.Now().Unix())
 	check := Default()

@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>NSLocalNetworkUsageDescription</key>
+    <string>在局域网中查找其他 Mac 上共享的视频壁纸，并共享你的资料库。</string>
+    <key>NSBonjourServices</key>
+    <array>
+        <string>_phosphenego._tcp</string>
+    </array>
+</dict>
+</plist>

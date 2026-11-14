@@ -11,11 +11,12 @@ import (
 )
 
 // prefs are the manager's own settings, kept apart from the library the
-// extension reads: how its window looks.
+// extension reads: how its window looks, and whether it shares the library.
 type prefs struct {
 	Appearance string `json:"appearance,omitempty"` // "light" or "dark"; empty follows the system
 	Accent     string `json:"accent,omitempty"`     // a key of accents; empty is the first
 	Glass      string `json:"glass,omitempty"`      // a key of looks; empty is the standard
+	Share      bool   `json:"share,omitempty"`      // share the library on the local network
 }
 
 // appearances are the choices of prefs.Appearance, in the order the
@@ -67,7 +68,7 @@ func (a *application) savePrefs() {
 		}
 	}
 	if err != nil {
-		a.status = "外观设置保存失败：" + err.Error()
+		a.status = "设置保存失败：" + err.Error()
 	}
 }
 

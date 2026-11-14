@@ -22,6 +22,7 @@ const (
 	sectionLibrary = "library"
 	sectionPlay    = "playlist"
 	sectionSetting = "settings"
+	sectionNearby  = "nearby"
 )
 
 func (a *application) view(c *ui.Context) {
@@ -49,6 +50,8 @@ func (a *application) view(c *ui.Context) {
 					a.playlistView(c)
 				case sectionSetting:
 					a.settingsView(c)
+				case sectionNearby:
+					a.nearbyView(c)
 				default:
 					a.libraryView(c)
 				}
@@ -122,6 +125,7 @@ func (a *application) sidebar(c *ui.Context) {
 		glassNav(c, &a.section, []navItem{
 			{sectionLibrary, iconLibrary, "资料库", strconv.Itoa(len(a.config.Media))},
 			{sectionPlay, iconPlaylist, "播放与显示器", strconv.Itoa(len(a.config.Playlist.VideoIDs))},
+			{sectionNearby, iconNearby, "附近的 Mac", a.nearbyBadge()},
 			{sectionSetting, iconSettings, "设置", ""},
 		})
 	})
@@ -585,6 +589,7 @@ func (a *application) settingsView(c *ui.Context) {
 					})
 				})
 			})
+			a.shareSettings(c)
 			ui.Column(c).Gap(10).FillWidth().Children(func() {
 				sectionTitle(c, iconFolder, "启用与资料库")
 				group(c, func() {

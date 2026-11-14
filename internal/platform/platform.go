@@ -18,6 +18,16 @@ type DisplayInfo struct {
 	BuiltIn       bool
 }
 
+// Peer is another Mac sharing its library on the local network, as Bonjour
+// found it: its service's name, the device identifier its TXT record
+// carries, and the IPv4 address and port it resolved to.
+type Peer struct {
+	Name   string
+	Device string
+	Host   string
+	Port   int64
+}
+
 // Host exposes the macOS operations needed by the local video library.
 //
 //mygo:native
@@ -33,4 +43,16 @@ type Host interface {
 	// was made: it posts one when WallpaperAgent stops serving it, for the
 	// app to restart WallpaperAgent, which the sandboxed extension cannot.
 	AgentStuckSignals() (int64, error)
+	// ComputerName is the name this Mac goes by on the network.
+	ComputerName() (string, error)
+	// Advertise publishes the library shared on port as the Bonjour
+	// service _phosphenego._tcp named name, whose TXT record carries
+	// device; advertising again replaces it.
+	Advertise(name string, port int64, device string) error
+	// StopAdvertising withdraws what Advertise published.
+	StopAdvertising() error
+	// Peers browses for shared libraries, from its first call on, and
+	// returns those found and resolved so far. Browsing asks for the local
+	// network the first time, so it waits until the user looks for peers.
+	Peers() ([]Peer, error)
 }
