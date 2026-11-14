@@ -123,7 +123,7 @@ func (a *application) backdrop(c *ui.Context, l *look, scale float32) {
 	} else {
 		overlay(ui.Box(c)).Gradient(t.Accent.Alpha(0.35), t.Background, 135)
 	}
-	overlay(ui.Box(c)).Background(pick(t, ui.RGBA(255, 255, 255, 1.1*l.tone), ui.RGBA(0, 0, 0, l.dark)))
+	overlay(ui.Box(c)).Background(l.backdropTone(t))
 }
 
 // ambientID is the video the backdrop shows: the one on the first display
@@ -191,7 +191,7 @@ func pageFrame(c *ui.Context, title, subtitle string, actions func(), body func(
 			Material(glass.Blur{Radius: 16, Mask: &ui.LinearGradient{From: ui.RGB(0, 0, 0), To: ui.Transparent, Angle: 180, Start: 0.55, End: 1}})
 		// The backdrop's tone over it, so what scrolls under the title fades
 		// out rather than shows through it, as a scroll edge does.
-		edge := current.edgeTone(c)
+		edge := current.edgeTone(c.Theme())
 		ui.Box(c).Absolute().Top(0).Left(0).Right(0).Height(headerHeight).PassThrough().Gradient(edge, edge.Alpha(0), 180)
 		ui.Row(c).Absolute().Top(0).Left(0).Right(0).Height(headerHeight).AlignItems(ui.Center).Gap(10).
 			Padding(0, bar.Right+20, 0, 24).DragWindow().Children(func() {

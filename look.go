@@ -72,7 +72,7 @@ func (l *look) fillContent(c *ui.Context, e ui.Element) ui.Element {
 	if !l.glass {
 		return l.fillPane(c, e)
 	}
-	return e.Material(contentMaterial{blur: l.contentBlur, tint: pick(t, ui.RGBA(255, 255, 255, l.content), ui.RGBA(28, 28, 30, l.content))}).
+	return e.Material(contentMaterial{blur: l.contentBlur, tint: l.contentTint(t)}).
 		Border(1, t.Text.Alpha(0.07))
 }
 
@@ -93,10 +93,20 @@ func (m contentMaterial) PaintMaterial(p *ui.Painter, box ui.Rect, radii [4]floa
 	p.FillRadii(box, radii, tint)
 }
 
+// backdropTone is the tone over the blurred wallpaper: it lightens it in
+// light mode and darkens it in dark mode, as far as the look says.
+func (l *look) backdropTone(t *ui.Theme) ui.Color {
+	return pick(t, ui.RGBA(255, 255, 255, 1.1*l.tone), ui.RGBA(0, 0, 0, l.dark))
+}
+
+// contentTint is the tint of the content layer's material.
+func (l *look) contentTint(t *ui.Theme) ui.Color {
+	return pick(t, ui.RGBA(255, 255, 255, l.content), ui.RGBA(28, 28, 30, l.content))
+}
+
 // edgeTone is the color that content fades into under the page's title:
-// the backdrop's tone, or without glass the plain background.
-func (l *look) edgeTone(c *ui.Context) ui.Color {
-	t := c.Theme()
+// the backdrop's tone, deeper, or without glass the plain background.
+func (l *look) edgeTone(t *ui.Theme) ui.Color {
 	if !l.glass {
 		return solidBackground(t)
 	}
