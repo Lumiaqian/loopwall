@@ -41,8 +41,13 @@ registrar='/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchSe
 "$registrar" -u "$source_app" || true
 "$registrar" -f "$installed_app"
 # A first install, or one whose registration went missing, registers it.
+# Unregistering the build's copy above can take the installed copy's
+# registration, of the same identifier, with it a moment later, so each
+# restart below checks again.
 extension="$installed_app/Contents/Extensions/PhospheneExtension.appex"
-pluginkit -m -i local.lumiaqian.phosphenego.extension | grep -q . || pluginkit -a "$extension"
+register_extension() {
+	pluginkit -m -i local.lumiaqian.phosphenego.extension | grep -q . || pluginkit -a "$extension"
+}
 # Restarting WallpaperAgent retires the running extension and launches the new
 # one, rebuilding every display's wallpaper. Wait for the new one's report;
 # should it stay silent, restart again, waiting longer each time. A locked
@@ -59,6 +64,7 @@ extension_reports() { # since, seconds: the extension wrote its report after sin
 sleep 2
 reported=
 for wait in 30 30 45 45; do
+	register_extension
 	restarted=$(date +%s)
 	killall -TERM WallpaperAgent 2>/dev/null || true
 	if extension_reports "$restarted" "$wait"; then
