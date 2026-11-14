@@ -86,3 +86,23 @@ require(GeometryVerdict.decide(laidOutSize: CGSize(width: 5_120, height: 2_880),
 require(GeometryVerdict.decide(laidOutSize: CGSize(width: 1_280, height: 720), laidOutScale: 4, displaySize: display, displayScale: 2) == .reframe(size: display, scale: 2), "scaled destination is reframed")
 require(GeometryVerdict.decide(laidOutSize: CGSize(width: 1_920, height: 1_080), laidOutScale: 2, displaySize: display, displayScale: 2) == .differentPixels, "resolution change waits for system reacquire")
 print("PASS: display geometry and Go ↔ Swift runtime progress")
+
+// Pins: a display plays its one video instead of the playlist while it can.
+let pins = config.playlist.pins ?? [:]
+require(pins["display-A"] == items[2].id && pins["display-B"] == nil, "pins decode from the Go configuration")
+let anyUsable: (String) -> Bool = { _ in true }
+func displayItems(_ key: String, usable: (String) -> Bool) -> [MediaEntry] {
+    config.playlist.items(for: key, media: items, playlist: items, usable: usable)
+}
+require(displayItems("display-A", usable: anyUsable).map(\.id) == [items[2].id], "pinned display plays its video only")
+require(displayItems("display-B", usable: anyUsable) == items, "unpinned display plays the playlist")
+require(displayItems("display-A", usable: { $0 != items[2].id }) == items, "an unusable pin falls back to the playlist")
+var pinned = DisplayProgress(displayKey: "display-A", videoID: items[0].id, positionSeconds: 3, itemElapsedSeconds: 3)
+PlaylistTimeline.reconcile(&pinned, oldOrder: config.playlist.videoIDs, items: [items[2]], resetElapsed: false)
+require(pinned.videoID == items[2].id && pinned.positionSeconds == 0, "pinning moves a display to the start of its video")
+PlaylistTimeline.advance(&pinned, seconds: 25, items: [items[2]], rule: config.playlist)
+require(pinned.videoID == items[2].id && close(pinned.positionSeconds, 5), "a pinned video loops")
+var badPins = config
+badPins.playlist.pins = ["display-A": "44444444-4444-4444-8444-444444444444"]
+require((try? badPins.validated()) == nil, "a pin to a missing video is rejected")
+print("PASS: per-display pins")

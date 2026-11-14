@@ -8,6 +8,7 @@ import (
 	"image/color"
 	"image/png"
 	"log"
+	"maps"
 	"os"
 	"path/filepath"
 	"slices"
@@ -280,6 +281,7 @@ func (a *application) deleteMedia(m catalog.MediaEntry) {
 			a.busy = false
 			if err == nil && r.Button == 1 {
 				a.config.Playlist.VideoIDs = slices.DeleteFunc(a.config.Playlist.VideoIDs, func(id string) bool { return id == m.ID })
+				maps.DeleteFunc(a.config.Playlist.Pins, func(_, id string) bool { return id == m.ID })
 				a.config.Media = slices.DeleteFunc(a.config.Media, func(e catalog.MediaEntry) bool { return e.ID == m.ID })
 				a.config.RemovedMediaIDs = append(a.config.RemovedMediaIDs, m.ID)
 				delete(a.thumbs, m.ID)

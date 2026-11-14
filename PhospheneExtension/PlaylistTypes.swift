@@ -16,6 +16,18 @@ struct PlaylistSpec: Codable, Equatable, Sendable {
     var advanceMode = "end"
     var intervalSeconds = 60
     var keepAwakeWhenLockedOnAC = true
+    /// Display UUID → the one video it plays instead of the playlist. Optional,
+    /// so configurations written before it decode unchanged.
+    var pins: [String: String]?
+
+    /// What display `key` plays: its pinned video while that one is usable,
+    /// else the playlist, which it falls back to rather than going dark.
+    func items(for key: String, media: [MediaEntry], playlist: [MediaEntry], usable: (String) -> Bool) -> [MediaEntry] {
+        if let id = pins?[key], usable(id), let pinned = media.first(where: { $0.id == id }) {
+            return [pinned]
+        }
+        return playlist
+    }
 }
 struct LibraryConfig: Codable, Equatable, Sendable {
     var schemaVersion = 1
@@ -24,11 +36,13 @@ struct LibraryConfig: Codable, Equatable, Sendable {
     var playlist = PlaylistSpec()
 
     func validated() throws -> Self {
+        let mediaIDs = Set(media.map(\.id))
         guard schemaVersion == 1, ["end", "duration"].contains(playlist.advanceMode),
               playlist.intervalSeconds > 0,
               Set(media.map(\.id)).count == media.count,
               Set(playlist.videoIDs).count == playlist.videoIDs.count,
               Set(playlist.videoIDs).isSubset(of: Set(media.map(\.id))),
+              (playlist.pins ?? [:]).allSatisfy({ !$0.key.isEmpty && mediaIDs.contains($0.value) }),
               media.allSatisfy({ UUID(uuidString: $0.id) != nil &&
                       !$0.filename.isEmpty && $0.filename != "." && $0.filename != ".." &&
                       !$0.filename.contains("/") && !$0.filename.contains("\\") &&

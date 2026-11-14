@@ -36,9 +36,16 @@ final class PlaylistController: @unchecked Sendable {
     }
     private var items: [MediaEntry] {
         config.playlist.videoIDs.compactMap { id in
-            guard !rejected.contains(id), VideoLibrary.shared.videoURL(for: id) != nil else { return nil }
+            guard usable(id) else { return nil }
             return config.media.first { $0.id == id }
         }
+    }
+    private func usable(_ id: String) -> Bool {
+        !rejected.contains(id) && VideoLibrary.shared.videoURL(for: id) != nil
+    }
+    /// What display `key` plays: its pinned video, or the playlist.
+    private func items(for key: String) -> [MediaEntry] {
+        config.playlist.items(for: key, media: config.media, playlist: items, usable: usable)
     }
 
     func start() {
@@ -76,7 +83,7 @@ final class PlaylistController: @unchecked Sendable {
             guard !preview else { return playable.first.map { DisplayProgress(displayKey: "preview", videoID: $0.id) } }
             refreshDisplays()
             guard let key = displayKeys[displayID] else { return nil }
-            ensureSession(key: key, items: playable)
+            ensureSession(key: key, items: items(for: key))
             return sessions[key]
         }
     }
@@ -87,9 +94,9 @@ final class PlaylistController: @unchecked Sendable {
         let signature = "\(config.playlist.advanceMode):\(config.playlist.intervalSeconds)"
         let ruleChanged = persistedRule.map { $0 != signature } ?? (old.playlist.advanceMode != config.playlist.advanceMode || old.playlist.intervalSeconds != config.playlist.intervalSeconds)
         persistedRule = signature
-        let playable = items
+        // Each display against its own items, so a pinned one keeps its place.
         for key in sessions.keys {
-            PlaylistTimeline.reconcile(&sessions[key]!, oldOrder: old.playlist.videoIDs, items: playable, resetElapsed: ruleChanged)
+            PlaylistTimeline.reconcile(&sessions[key]!, oldOrder: old.playlist.videoIDs, items: items(for: key), resetElapsed: ruleChanged)
         }
         if ruleChanged {
             clocks.removeAll()
@@ -127,12 +134,14 @@ final class PlaylistController: @unchecked Sendable {
         refreshDisplays()
         let state = PlaybackStore.snapshot
         let registry = SurfaceRegistry.shared
-        var playable = items
+        let playlist = items
+        var playing = false
         var active = Set<String>()
         var open = Set<String>()
         var seenRenderers = Set<Int>()
         let grouped = Dictionary(grouping: state.surfaces.filter { $0.value.role == .desktop }, by: { displayKeys[$0.key.displayID] ?? "" })
         for (key, surfaces) in grouped where !key.isEmpty {
+            var playable = items(for: key)
             ensureSession(key: key, items: playable)
             guard var progress = sessions[key] else { continue }
             PlaylistTimeline.reconcile(&progress, oldOrder: config.playlist.videoIDs, items: playable, resetElapsed: false)
@@ -143,12 +152,13 @@ final class PlaylistController: @unchecked Sendable {
                 .compactMap { registry.surface(for: $0.key)?.renderer }.first
             if !visible.isEmpty {
                 active.insert(key)
+                playing = playing || !playable.isEmpty
             }
             if let leader, !playable.isEmpty {
                 let sample = leader.clockSample()
                 if sample.failed {
                     reject(progress.videoID, message: "原生解码失败")
-                    playable = items
+                    playable = items(for: key)
                     PlaylistTimeline.reconcile(&progress, oldOrder: config.playlist.videoIDs, items: playable, resetElapsed: true)
                     clocks[key] = nil
                 } else if sample.ready, sample.url == VideoLibrary.shared.videoURL(for: progress.videoID) {
@@ -210,7 +220,7 @@ final class PlaylistController: @unchecked Sendable {
                 open.insert(url.deletingLastPathComponent().lastPathComponent)
             }
             // Keep previews current after edits, without creating any persistent session.
-            if let first = playable.first, let url = VideoLibrary.shared.videoURL(for: first.id) {
+            if let first = playlist.first, let url = VideoLibrary.shared.videoURL(for: first.id) {
                 renderer.play(url, at: 0)
             } else {
                 renderer.apply(.paused)
@@ -224,7 +234,7 @@ final class PlaylistController: @unchecked Sendable {
         awake.update(
             enabled: config.playlist.keepAwakeWhenLockedOnAC,
             locked: state.screenLocked,
-            active: !active.isEmpty && !playable.isEmpty,
+            active: playing,
             asleep: state.displaysAsleep,
         )
         if Date().timeIntervalSince(lastSave) >= 5 {
@@ -235,7 +245,7 @@ final class PlaylistController: @unchecked Sendable {
     /// asset was rejected. The registry claim prevents racing the XPC acquire task.
     private func attachRenderer(to key: SurfaceKey, progress: DisplayProgress?) {
         guard let progress, let url = VideoLibrary.shared.videoURL(for: progress.videoID),
-              !items.isEmpty, let surface = SurfaceRegistry.shared.surface(for: key),
+              !items(for: progress.displayKey).isEmpty, let surface = SurfaceRegistry.shared.surface(for: key),
               SurfaceRegistry.shared.claimRendererCreate(for: key) else { return }
         let root = SendableBox(value: surface.rootLayer)
         Task {
