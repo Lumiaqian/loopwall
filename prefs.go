@@ -5,7 +5,7 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/Lumiaqian/phosphene-go/internal/catalog"
+	"github.com/Lumiaqian/loopwall/internal/catalog"
 	"github.com/egoist/mygo"
 	"github.com/egoist/mygo/ui"
 )
@@ -43,6 +43,46 @@ func prefsPath() (string, error) {
 		return "", err
 	}
 	return filepath.Join(dir, "settings.json"), nil
+}
+
+// legacyUserData is the directory Phosphene Go, as the app was named,
+// kept its settings in, beside the one Loopwall keeps them in.
+const legacyUserData = "Phosphene Go"
+
+// userDataFiles are the files the app keeps in its user data directory:
+// its settings, and sharing's identity, pairings and certificate.
+var userDataFiles = []string{"settings.json", "share.json", "share-cert.pem", "share-key.pem"}
+
+// migrateUserData moves the files the app kept as Phosphene Go into its
+// directory, each unless there is one there already.
+func migrateUserData() error {
+	path, err := prefsPath()
+	if err != nil {
+		return err
+	}
+	dir := filepath.Dir(path)
+	return moveFiles(filepath.Join(filepath.Dir(dir), legacyUserData), dir, userDataFiles...)
+}
+
+// moveFiles moves the files names from one directory to another, each
+// only if it is in the first and not in the second.
+func moveFiles(from, to string, names ...string) error {
+	for _, name := range names {
+		src, dst := filepath.Join(from, name), filepath.Join(to, name)
+		if _, err := os.Stat(src); err != nil {
+			continue
+		}
+		if _, err := os.Stat(dst); err == nil {
+			continue
+		}
+		if err := os.MkdirAll(to, 0o700); err != nil {
+			return err
+		}
+		if err := os.Rename(src, dst); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // loadPrefs reads the saved settings; missing or unreadable ones are the

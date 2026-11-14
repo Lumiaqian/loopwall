@@ -17,7 +17,7 @@ import (
 )
 
 const SchemaVersion = 1
-const ExtensionID = "local.lumiaqian.phosphenego.extension"
+const ExtensionID = "local.lumiaqian.loopwall.extension"
 
 type MediaEntry struct {
 	ID              string  `json:"id"`

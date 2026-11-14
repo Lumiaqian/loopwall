@@ -4,8 +4,8 @@ cd "$(dirname "$0")/.."
 # A failed build stops before touching the installed app.
 scripts/test.sh
 scripts/build-local.sh
-source_app="$PWD/dist/darwin-arm64/Phosphene Go.app"
-installed_app="$HOME/Applications/Phosphene Go.app"
+source_app="$PWD/dist/darwin-arm64/Loopwall.app"
+installed_app="$HOME/Applications/Loopwall.app"
 codesign --verify --deep --strict "$source_app"
 # Stop the manager only. Killing the extension behind WallpaperAgent's back
 # keeps WallpaperAgent from launching it again for minutes; restarting
@@ -13,7 +13,7 @@ codesign --verify --deep --strict "$source_app"
 python3 - "$installed_app" <<'PY'
 import os, signal, subprocess, sys, time
 app = sys.argv[1]
-executables = {app + '/Contents/MacOS/Phosphene Go'}
+executables = {app + '/Contents/MacOS/Loopwall'}
 pids = []
 for line in subprocess.check_output(['ps', '-axo', 'pid=,comm='], text=True).splitlines():
     pid, path = line.strip().split(None, 1)
@@ -44,15 +44,15 @@ registrar='/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchSe
 # Unregistering the build's copy above can take the installed copy's
 # registration, of the same identifier, with it a moment later, so each
 # restart below checks again.
-extension="$installed_app/Contents/Extensions/PhospheneExtension.appex"
+extension="$installed_app/Contents/Extensions/LoopwallExtension.appex"
 register_extension() {
-	pluginkit -m -i local.lumiaqian.phosphenego.extension | grep -q . || pluginkit -a "$extension"
+	pluginkit -m -i local.lumiaqian.loopwall.extension | grep -q . || pluginkit -a "$extension"
 }
 # Restarting WallpaperAgent retires the running extension and launches the new
 # one, rebuilding every display's wallpaper. Wait for the new one's report;
 # should it stay silent, restart again, waiting longer each time. A locked
 # screen also keeps it silent; then this only warns.
-runtime="$HOME/Library/Containers/local.lumiaqian.phosphenego.extension/Data/Documents/runtime.json"
+runtime="$HOME/Library/Containers/local.lumiaqian.loopwall.extension/Data/Documents/runtime.json"
 extension_reports() { # since, seconds: the extension wrote its report after since
 	local since=$1
 	for _ in $(seq 1 "$2"); do

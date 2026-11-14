@@ -3,7 +3,7 @@ import Foundation
 
 /// A stable tile: MyGO owns the list and timing, so edits never rewrite the system's selection.
 func buildSettingsViewModelsXPC() async -> AnyObject? {
-    let bundleID = "local.lumiaqian.phosphenego.extension"
+    let bundleID = "local.lumiaqian.loopwall.extension"
     let library = VideoLibrary.shared
     library.scan()
     let first = library.config.playlist.videoIDs.compactMap { library.entry(for: $0) }.first
@@ -13,21 +13,21 @@ func buildSettingsViewModelsXPC() async -> AnyObject? {
         placeholderThumbnailURL()
     }
     guard let thumbnail else { return makeEmptyGroupsResponse() }
-    let menu = ContextMenu(items: [ContextMenuItem(id: ContextMenuItemID(id: "manage-library"), localizedTitle: "打开 Phosphene Go", isDestructive: false)])
+    let menu = ContextMenu(items: [ContextMenuItem(id: ContextMenuItemID(id: "manage-library"), localizedTitle: "打开 Loopwall", isDestructive: false)])
     let choiceID = ChoiceID(id: playlistChoiceID, descriptor: ChoiceIDDescriptor(
         provider: ChoiceProviderID(rawValue: bundleID), identifier: playlistChoiceID,
         files: [], configuration: Data(playlistChoiceID.utf8),
     ))
     let item = SettingsItem(
         id: choiceID,
-        localizedName: "Phosphene Go 轮播",
+        localizedName: "Loopwall 轮播",
         thumbnail: .image(url: thumbnail),
         choice: ChoiceDescriptor(
             id: choiceID,
             provider: ChoiceProviderID(rawValue: bundleID),
             identifier: playlistChoiceID,
-            name: "Phosphene Go 轮播",
-            localizedDescription: "各屏独立续播 · 在 Phosphene Go 中编辑列表",
+            name: "Loopwall 轮播",
+            localizedDescription: "各屏独立续播 · 在 Loopwall 中编辑列表",
             thumbnail: .image(url: thumbnail),
             isDownloaded: true,
             options: [],
@@ -39,9 +39,9 @@ func buildSettingsViewModelsXPC() async -> AnyObject? {
         contextMenu: menu,
     )
     let group = SettingsGroup(
-        id: GroupID(id: "phosphenego-video-wallpapers"),
+        id: GroupID(id: "loopwall-video-wallpapers"),
         items: [item],
-        localizedName: "Phosphene Go",
+        localizedName: "Loopwall",
         disposability: .none,
         sortOrder: -100,
         sortID: GroupSortID(id: "com.apple.wallpaper.aerials"),

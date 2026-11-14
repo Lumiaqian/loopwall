@@ -19,7 +19,7 @@
 // signature before accepting a connection. Guarded with -respondsToSelector:
 // at the call site so a future OS that drops the SPI degrades gracefully.
 
-@interface NSXPCConnection (PhospheneCallerIdentity)
+@interface NSXPCConnection (LoopwallCallerIdentity)
 @property (nonatomic, readonly) audit_token_t auditToken;
 @end
 

@@ -1,4 +1,4 @@
-module github.com/Lumiaqian/phosphene-go
+module github.com/Lumiaqian/loopwall
 
 go 1.27.3
 

@@ -14,8 +14,8 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/Lumiaqian/phosphene-go/internal/catalog"
-	"github.com/Lumiaqian/phosphene-go/internal/share"
+	"github.com/Lumiaqian/loopwall/internal/catalog"
+	"github.com/Lumiaqian/loopwall/internal/share"
 	"github.com/egoist/mygo"
 	"github.com/egoist/mygo/ui"
 )

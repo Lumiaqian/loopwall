@@ -8,7 +8,7 @@ import (
 	"syscall"
 	"testing"
 
-	"github.com/Lumiaqian/phosphene-go/internal/share"
+	"github.com/Lumiaqian/loopwall/internal/share"
 )
 
 func TestFriendly(t *testing.T) {

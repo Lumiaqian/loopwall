@@ -32,7 +32,7 @@ final class LockDisplayAssertion {
             let result = IOPMAssertionCreateWithName(
                 kIOPMAssertionTypePreventUserIdleDisplaySleep as CFString,
                 IOPMAssertionLevel(kIOPMAssertionLevelOn),
-                "Phosphene Go 接电锁屏播放" as CFString,
+                "Loopwall 接电锁屏播放" as CFString,
                 &assertion,
             )
             if result != kIOReturnSuccess {

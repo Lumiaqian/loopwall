@@ -7,7 +7,7 @@ nonisolated enum PresentationMode: Equatable, Sendable, CustomStringConvertible 
     case `default`
     /// The lock screen.
     case locked
-    /// The screensaver slot: ours when a Phosphene choice is the screensaver, a
+    /// The screensaver slot: ours when a Loopwall choice is the screensaver, a
     /// foreign screensaver covering us otherwise.
     case idle
     case other(String)

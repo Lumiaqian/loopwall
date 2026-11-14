@@ -18,7 +18,7 @@ struct SendableBox<T>: @unchecked Sendable { let value: T }
 /// serial queue — mirroring Apple's single `Controller`-actor `AsyncQueue` — so an
 /// invalidate can't slip between the halves of an acquire.
 enum Lifecycle {
-    static let queue = DispatchQueue(label: "local.lumiaqian.phosphenego.lifecycle")
+    static let queue = DispatchQueue(label: "local.lumiaqian.loopwall.lifecycle")
 
     /// Pending per-surface teardown timers. Touched only on `queue`.
     nonisolated(unsafe) static var teardownTimers: [SurfaceKey: DispatchWorkItem] = [:]
@@ -197,7 +197,7 @@ final class WallpaperXPCHandler: NSObject, WallpaperExtensionXPCProtocol {
             : CAContext.perform(NSSelectorFromString("remoteContextWithOptions:"), with: contextOptions)?.takeUnretainedValue()
         guard let caContext = caContextRaw as? CAContext, caContext.contextId != 0 else {
             extensionLog("  ERROR: remote CAContext creation failed — failing acquire")
-            reply(nil, NSError(domain: "PhospheneExtension", code: 4, userInfo: [NSLocalizedDescriptionKey: "Failed to create remote CAContext"]))
+            reply(nil, NSError(domain: "LoopwallExtension", code: 4, userInfo: [NSLocalizedDescriptionKey: "Failed to create remote CAContext"]))
             return
         }
         let contextId = caContext.contextId
@@ -214,7 +214,7 @@ final class WallpaperXPCHandler: NSObject, WallpaperExtensionXPCProtocol {
         CATransaction.flush()
 
         guard let replyObj = createRemoteContextXPC(contextId: contextId) else {
-            reply(nil, NSError(domain: "PhospheneExtension", code: 3, userInfo: nil)); return
+            reply(nil, NSError(domain: "LoopwallExtension", code: 3, userInfo: nil)); return
         }
 
         // Install the surface now (renderer added async) so a concurrent acquire for the
@@ -252,7 +252,7 @@ final class WallpaperXPCHandler: NSObject, WallpaperExtensionXPCProtocol {
             return
         }
 
-        // Cold start = no Phosphene surface in the same role (preview vs. live desktop) on
+        // Cold start = no Loopwall surface in the same role (preview vs. live desktop) on
         // this display that the agent could keep compositing during the swap. On a switch
         // the outgoing context is ours and stays hosted (teardown grace) until we reply.
         // On a cold start the agent shows whatever our context holds the instant it hosts
@@ -339,7 +339,7 @@ final class WallpaperXPCHandler: NSObject, WallpaperExtensionXPCProtocol {
         reconcileSurfaceGeometry(for: key, because: "re-acquire")
 
         guard let replyObj = createRemoteContextXPC(contextId: existing.contextId) else {
-            reply(nil, NSError(domain: "PhospheneExtension", code: 3, userInfo: nil)); return
+            reply(nil, NSError(domain: "LoopwallExtension", code: 3, userInfo: nil)); return
         }
         reply(replyObj, nil)
 
@@ -510,8 +510,8 @@ final class WallpaperXPCHandler: NSObject, WallpaperExtensionXPCProtocol {
         extensionLog("=== CONTEXT MENU ACTION === identifier: \(identifier)")
 
         let urlByAction = [
-            "add-video": "phosphenego://add-video",
-            "manage-library": "phosphenego://library",
+            "add-video": "loopwall://add-video",
+            "manage-library": "loopwall://library",
         ]
         if let urlString = urlByAction[identifier], let url = URL(string: urlString) {
             extensionLog("  Launching companion app via NSWorkspace: \(urlString)")

@@ -160,11 +160,11 @@
 				<key>CURRENT_PROJECT_VERSION</key>
 				<string>29</string>
 				<key>PRODUCT_BUNDLE_IDENTIFIER</key>
-				<string>local.lumiaqian.phosphenego.extension</string>
+				<string>local.lumiaqian.loopwall.extension</string>
 				<key>STRING_CATALOG_GENERATE_SYMBOLS</key>
 				<string>YES</string>
 				<key>INFOPLIST_KEY_CFBundleDisplayName</key>
-				<string>PhospheneWallpaperExtension</string>
+				<string>LoopwallWallpaperExtension</string>
 				<key>MACOSX_DEPLOYMENT_TARGET</key>
 				<string>26.0</string>
 				<key>DEAD_CODE_STRIPPING</key>
@@ -192,13 +192,13 @@
 				<key>ENABLE_APP_SANDBOX</key>
 				<string>YES</string>
 				<key>SWIFT_OBJC_BRIDGING_HEADER</key>
-				<string>PhospheneExtension/WallpaperExtension-Bridging-Header.h</string>
+				<string>LoopwallExtension/WallpaperExtension-Bridging-Header.h</string>
 				<key>SWIFT_EMIT_LOC_STRINGS</key>
 				<string>YES</string>
 				<key>ENABLE_HARDENED_RUNTIME</key>
 				<string>YES</string>
 				<key>INFOPLIST_FILE</key>
-				<string>PhospheneExtension/Info.plist</string>
+				<string>LoopwallExtension/Info.plist</string>
 				<key>GENERATE_INFOPLIST_FILE</key>
 				<string>YES</string>
 			</dict>
@@ -208,7 +208,7 @@
 		<key>0B3364842F4FCB4B00060732</key>
 		<dict>
 			<key>path</key>
-			<string>PhospheneExtension</string>
+			<string>LoopwallExtension</string>
 			<key>isa</key>
 			<string>PBXFileSystemSynchronizedRootGroup</string>
 			<key>exceptions</key>
@@ -421,7 +421,7 @@
 			<key>productType</key>
 			<string>com.apple.product-type.extensionkit-extension</string>
 			<key>productName</key>
-			<string>PhospheneExtension</string>
+			<string>LoopwallExtension</string>
 			<key>isa</key>
 			<string>PBXNativeTarget</string>
 			<key>fileSystemSynchronizedGroups</key>
@@ -435,14 +435,14 @@
 				<string>0B3364812F4FCB4B00060732</string>
 			</array>
 			<key>name</key>
-			<string>PhospheneExtension</string>
+			<string>LoopwallExtension</string>
 			<key>buildRules</key>
 			<array/>
 		</dict>
 		<key>0B3364832F4FCB4B00060732</key>
 		<dict>
 			<key>path</key>
-			<string>PhospheneExtension.appex</string>
+			<string>LoopwallExtension.appex</string>
 			<key>isa</key>
 			<string>PBXFileReference</string>
 			<key>includeInIndex</key>
@@ -476,11 +476,11 @@
 				<key>CURRENT_PROJECT_VERSION</key>
 				<string>29</string>
 				<key>PRODUCT_BUNDLE_IDENTIFIER</key>
-				<string>local.lumiaqian.phosphenego.extension</string>
+				<string>local.lumiaqian.loopwall.extension</string>
 				<key>STRING_CATALOG_GENERATE_SYMBOLS</key>
 				<string>YES</string>
 				<key>INFOPLIST_KEY_CFBundleDisplayName</key>
-				<string>PhospheneWallpaperExtension</string>
+				<string>LoopwallWallpaperExtension</string>
 				<key>MACOSX_DEPLOYMENT_TARGET</key>
 				<string>26.0</string>
 				<key>DEAD_CODE_STRIPPING</key>
@@ -508,13 +508,13 @@
 				<key>ENABLE_APP_SANDBOX</key>
 				<string>YES</string>
 				<key>SWIFT_OBJC_BRIDGING_HEADER</key>
-				<string>PhospheneExtension/WallpaperExtension-Bridging-Header.h</string>
+				<string>LoopwallExtension/WallpaperExtension-Bridging-Header.h</string>
 				<key>SWIFT_EMIT_LOC_STRINGS</key>
 				<string>YES</string>
 				<key>ENABLE_HARDENED_RUNTIME</key>
 				<string>YES</string>
 				<key>INFOPLIST_FILE</key>
-				<string>PhospheneExtension/Info.plist</string>
+				<string>LoopwallExtension/Info.plist</string>
 				<key>GENERATE_INFOPLIST_FILE</key>
 				<string>YES</string>
 			</dict>

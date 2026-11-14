@@ -135,7 +135,7 @@ final class SurfaceRegistry: Sendable {
     }
 
     /// Whether this display already has a live renderer in the same role (preview or
-    /// desktop): an existing Phosphene surface WallpaperAgent keeps compositing in the
+    /// desktop): an existing Loopwall surface WallpaperAgent keeps compositing in the
     /// same `CALayerHost` while the new context comes up. On a cold start (nothing to
     /// hold for this role) the acquire replies as soon as the poster still is up; on a
     /// same-role switch it defers the reply until the new context renders video.

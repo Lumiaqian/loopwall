@@ -17,7 +17,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/Lumiaqian/phosphene-go/internal/catalog"
+	"github.com/Lumiaqian/loopwall/internal/catalog"
 )
 
 // maxFailures is how many wrong pairing codes invalidate the code: a
@@ -179,7 +179,7 @@ func (s *Server) pair(w http.ResponseWriter, r *http.Request) {
 func (s *Server) authorized(h http.HandlerFunc) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		token, _ := strings.CutPrefix(r.Header.Get("Authorization"), "Bearer ")
-		g, ok := s.store.granted(r.Header.Get("X-Phosphene-Device"))
+		g, ok := s.store.granted(r.Header.Get("X-Loopwall-Device"))
 		if !ok || token == "" || subtle.ConstantTimeCompare([]byte(hashHex(token)), []byte(g.TokenHash)) != 1 {
 			http.Error(w, "not paired", http.StatusUnauthorized)
 			return

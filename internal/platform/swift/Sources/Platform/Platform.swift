@@ -19,7 +19,7 @@ final class NativeHost: Host {
         CFNotificationCenterAddObserver(
             CFNotificationCenterGetDarwinNotifyCenter(), nil,
             { _, _, _, _, _ in stuckSignalCount.withLock { $0 += 1 } },
-            "local.lumiaqian.phosphenego.agentStuck" as CFString, nil, .deliverImmediately,
+            "local.lumiaqian.loopwall.agentStuck" as CFString, nil, .deliverImmediately,
         )
     }
 
@@ -30,7 +30,7 @@ final class NativeHost: Host {
     func probe(path: String, thumbnailPath: String) async throws -> MediaInfo {
         let asset = AVURLAsset(url: URL(fileURLWithPath: path))
         guard let track = try await asset.loadTracks(withMediaType: .video).first else {
-            throw NSError(domain: "PhospheneGo", code: 1, userInfo: [NSLocalizedDescriptionKey: "文件没有视频轨道"])
+            throw NSError(domain: "Loopwall", code: 1, userInfo: [NSLocalizedDescriptionKey: "文件没有视频轨道"])
         }
         let size = try await track.load(.naturalSize)
         let transform = try await track.load(.preferredTransform)
@@ -38,7 +38,7 @@ final class NativeHost: Host {
         let fps = try await track.load(.nominalFrameRate)
         let duration = try await track.load(.timeRange).duration.seconds
         guard duration.isFinite, duration > 0, frame.width > 0, frame.height > 0 else {
-            throw NSError(domain: "PhospheneGo", code: 2, userInfo: [NSLocalizedDescriptionKey: "视频时长或尺寸无效"])
+            throw NSError(domain: "Loopwall", code: 2, userInfo: [NSLocalizedDescriptionKey: "视频时长或尺寸无效"])
         }
         let generator = AVAssetImageGenerator(asset: asset)
         generator.appliesPreferredTrackTransform = true
@@ -47,11 +47,11 @@ final class NativeHost: Host {
         guard let destination = CGImageDestinationCreateWithURL(
             URL(fileURLWithPath: thumbnailPath) as CFURL, UTType.jpeg.identifier as CFString, 1, nil,
         ) else {
-            throw NSError(domain: "PhospheneGo", code: 3, userInfo: [NSLocalizedDescriptionKey: "无法写入视频缩略图"])
+            throw NSError(domain: "Loopwall", code: 3, userInfo: [NSLocalizedDescriptionKey: "无法写入视频缩略图"])
         }
         CGImageDestinationAddImage(destination, image, nil)
         guard CGImageDestinationFinalize(destination) else {
-            throw NSError(domain: "PhospheneGo", code: 4, userInfo: [NSLocalizedDescriptionKey: "保存视频缩略图失败"])
+            throw NSError(domain: "Loopwall", code: 4, userInfo: [NSLocalizedDescriptionKey: "保存视频缩略图失败"])
         }
         return MediaInfo(width: Int64(abs(frame.width)), height: Int64(abs(frame.height)), frameRate: Double(fps), duration: duration)
     }
@@ -77,7 +77,7 @@ final class NativeHost: Host {
             let root = URL(fileURLWithPath: String(cString: buffer))
                 .appendingPathComponent("com.apple.wallpaper.agent/com.apple.wallpaper.view-model-cache")
             for surface in ["desktop", "screenSaver"] {
-                let file = root.appendingPathComponent("extension-local.lumiaqian.phosphenego.extension-\(surface)")
+                let file = root.appendingPathComponent("extension-local.lumiaqian.loopwall.extension-\(surface)")
                 if FileManager.default.fileExists(atPath: file.path) {
                     try FileManager.default.removeItem(at: file)
                 }
@@ -85,7 +85,7 @@ final class NativeHost: Host {
         }
         CFNotificationCenterPostNotification(
             CFNotificationCenterGetDarwinNotifyCenter(),
-            CFNotificationName("local.lumiaqian.phosphenego.libraryChanged" as CFString), nil, nil, true,
+            CFNotificationName("local.lumiaqian.loopwall.libraryChanged" as CFString), nil, nil, true,
         )
     }
 }

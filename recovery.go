@@ -4,7 +4,7 @@ import (
 	"os/exec"
 	"time"
 
-	"github.com/Lumiaqian/phosphene-go/internal/catalog"
+	"github.com/Lumiaqian/loopwall/internal/catalog"
 )
 
 // WallpaperAgent sometimes stops serving the extension: after the extension

@@ -1,6 +1,6 @@
 # 使用与回退
 
-应用安装在 `~/Applications/Phosphene Go.app`，本地源码在 `~/tools/phosphene-go`，开发分支为 `feature/mygo-local-wallpaper`。
+应用安装在 `~/Applications/Loopwall.app`，源码仓库为 [Lumiaqian/loopwall](https://github.com/Lumiaqian/loopwall)，本机检出在 `~/tools/phosphene-go`，主分支为 `main`。
 
 ## 常用操作
 
