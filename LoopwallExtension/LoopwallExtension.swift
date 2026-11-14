@@ -3,7 +3,7 @@ import ExtensionFoundation
 import Foundation
 
 @main
-final class PhospheneExtension: NSObject, AppExtension {
+final class LoopwallExtension: NSObject, AppExtension {
     override required init() {
         super.init()
 
@@ -67,7 +67,7 @@ final class PhospheneExtension: NSObject, AppExtension {
                 PlaylistController.shared.reload()
                 SettingsPush.libraryDidChange()
             },
-            "local.lumiaqian.phosphenego.libraryChanged" as CFString,
+            "local.lumiaqian.loopwall.libraryChanged" as CFString,
             nil,
             .deliverImmediately,
         )

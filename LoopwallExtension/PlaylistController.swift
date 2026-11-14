@@ -6,7 +6,7 @@ import Foundation
 /// The serial queue owns sessions, clock observations and the progress file.
 final class PlaylistController: @unchecked Sendable {
     static let shared = PlaylistController()
-    private let queue = DispatchQueue(label: "local.lumiaqian.phosphenego.playlist")
+    private let queue = DispatchQueue(label: "local.lumiaqian.loopwall.playlist")
     private var config = LibraryConfig()
     private var sessions: [String: DisplayProgress] = [:]
     private var displayKeys: [UInt32: String] = [:]

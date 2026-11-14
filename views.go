@@ -9,7 +9,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/Lumiaqian/phosphene-go/internal/catalog"
+	"github.com/Lumiaqian/loopwall/internal/catalog"
 	"github.com/egoist/mygo"
 	"github.com/egoist/mygo/plugins/glass"
 	"github.com/egoist/mygo/ui"
@@ -147,7 +147,7 @@ func (a *application) sidebar(c *ui.Context) {
 	t := c.Theme()
 	ui.Box(c).Height(titleBarHeight).Shrink(0).DragWindow()
 	ui.Column(c).Padding(0, 16, 14, 18).Gap(2).Children(func() {
-		ui.Text(c, "Phosphene Go").FontSize(17).Bold()
+		ui.Text(c, "Loopwall").FontSize(17).Bold()
 		ui.Text(c, "本地视频壁纸").FontSize(12).TextColor(t.TextMuted)
 	})
 	ui.Column(c).Grow(1).Children(func() {
@@ -622,7 +622,7 @@ func (a *application) settingsView(c *ui.Context) {
 			ui.Column(c).Gap(10).FillWidth().Children(func() {
 				sectionTitle(c, iconFolder, "启用与资料库")
 				group(c, func() {
-					groupRow(c, "系统墙纸", "首次使用：在系统墙纸设置中选中「Phosphene Go 轮播」并应用到需要的显示器。", func() {
+					groupRow(c, "系统墙纸", "首次使用：在系统墙纸设置中选中「Loopwall 轮播」并应用到需要的显示器。", func() {
 						glassButton(c, iconExternal, "打开", false).OnClick(openWallpaperSettings)
 					})
 					ui.Divider(c)
@@ -631,7 +631,7 @@ func (a *application) settingsView(c *ui.Context) {
 					})
 				})
 			})
-			current.onBackdrop(c, ui.Text(c, "Phosphene Go 0.1.0 · 基于 Phosphene v1.11.4 · MyGO v0.9.0 · MIT License").FontSize(11), true)
+			current.onBackdrop(c, ui.Text(c, "Loopwall 0.1.0 · 基于 Phosphene v1.11.4 · MyGO v0.9.0 · MIT License").FontSize(11), true)
 		})
 	})
 }
@@ -785,7 +785,7 @@ func (s displayState) detail() string {
 	if s.ok && s.waiting {
 		return "等待系统恢复展示"
 	}
-	return "在系统墙纸设置中选择「Phosphene Go 轮播」"
+	return "在系统墙纸设置中选择「Loopwall 轮播」"
 }
 
 // --- formatting ---

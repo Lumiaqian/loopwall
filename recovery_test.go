@@ -4,7 +4,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Lumiaqian/phosphene-go/internal/catalog"
+	"github.com/Lumiaqian/loopwall/internal/catalog"
 )
 
 func TestWallpaperRecovery(t *testing.T) {

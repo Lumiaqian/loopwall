@@ -8,7 +8,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/Lumiaqian/phosphene-go/internal/catalog"
+	"github.com/Lumiaqian/loopwall/internal/catalog"
 )
 
 const videoID = "11111111-1111-4111-8111-111111111111"
@@ -23,7 +23,7 @@ func library(t *testing.T) (string, []byte) {
 	if err := catalog.Save(root, &c); err != nil {
 		t.Fatal(err)
 	}
-	video := bytes.Repeat([]byte("phosphene"), 100_000)
+	video := bytes.Repeat([]byte("loopwall"), 100_000)
 	if err := os.MkdirAll(filepath.Dir(catalog.VideoPath(root, m)), 0700); err != nil {
 		t.Fatal(err)
 	}

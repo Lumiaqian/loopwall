@@ -131,7 +131,7 @@ func (c *Client) get(ctx context.Context, peer Peer, path string, timeout time.D
 		return nil, err
 	}
 	req.Header.Set("Authorization", "Bearer "+p.Token)
-	req.Header.Set("X-Phosphene-Device", c.store.Device())
+	req.Header.Set("X-Loopwall-Device", c.store.Device())
 	resp, err := hc.Do(req)
 	if err != nil {
 		if errors.Is(err, ErrChangedCertificate) {

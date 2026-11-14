@@ -7,7 +7,7 @@ import Foundation
 /// after an extension (re)installation or an OS update. Without a push, a library
 /// change made between queries never becomes visible; in particular, the first query
 /// fires at registration, before the user has added any video, so a fresh install
-/// caches an empty group and the Phosphene section stays missing across reboots
+/// caches an empty group and the Loopwall section stays missing across reboots
 /// (issue #27). `updateSettingsViewModels` is the host callback that refreshes that
 /// cache and updates an open Settings pane in place.
 enum SettingsPush {

@@ -25,7 +25,7 @@ Go 是资料库和配置的唯一产品写入方，Swift 扩展是进度的唯�
 
 `runtime.json` 保存 `schemaVersion`、`appliedRevision`、`updatedAtUnix`、`ruleSignature`、`displays`、`activeDisplayKeys`、`openVideoIDs`、`keepAwakeActive`、`errors`。每个 `DisplayProgress` 保存 `displayKey`、`videoID`、`positionSeconds`、`itemElapsedSeconds`。
 
-Go 通过同目录临时文件、同步并原子 rename 发布配置；扩展通过 `.atomic` 写运行进度。Darwin 通知 `local.lumiaqian.phosphenego.libraryChanged` 通知扩展重读，扩展无进程时由下次启动读取。管理端读取运行进度并标明陈旧状态。
+Go 通过同目录临时文件、同步并原子 rename 发布配置；扩展通过 `.atomic` 写运行进度。Darwin 通知 `local.lumiaqian.loopwall.libraryChanged` 通知扩展重读，扩展无进程时由下次启动读取。管理端读取运行进度并标明陈旧状态。
 
 ## 导入与删除
 
@@ -37,9 +37,9 @@ Go 通过同目录临时文件、同步并原子 rename 发布配置；扩展通
 
 ## 局域网共享
 
-管理端在「共享我的资料库」打开时运行只读 HTTPS 服务（`internal/share`），端口随机，并由原生模块用 Bonjour 发布为 `_phosphenego._tcp`，TXT 记录携带本机设备 ID。查找在用户打开「附近的 Mac」后才开始（`NWBrowser`），以连接得到对方的 IPv4 地址和端口，再排除本机。
+管理端在「共享我的资料库」打开时运行只读 HTTPS 服务（`internal/share`），端口随机，并由原生模块用 Bonjour 发布为 `_loopwall._tcp`，TXT 记录携带本机设备 ID。查找在用户打开「附近的 Mac」后才开始（`NWBrowser`），以连接得到对方的 IPv4 地址和端口，再排除本机。
 
-- 身份：每台 Mac 在 `~/Library/Application Support/Phosphene Go/share.json` 保存随机设备 ID、已授权的设备（只存令牌的 SHA-256）、已配对的对方（令牌与证书指纹）以及导入记录；自签名证书和私钥同目录，权限 0600。
+- 身份：每台 Mac 在 `~/Library/Application Support/Loopwall/share.json` 保存随机设备 ID、已授权的设备（只存令牌的 SHA-256）、已配对的对方（令牌与证书指纹）以及导入记录；自签名证书和私钥同目录，权限 0600。
 - 配对：接收方提交共享方显示的 6 位配对码，换得令牌，并固定共享方证书的指纹；此后指纹不符即拒绝连接并要求重新配对。配对码用过一次即更换，连续输错 5 次作废，需在共享方「换一个」。共享方可随时取消某台设备的授权，接收方也可取消配对。
 - 接口：`POST /v1/pair`、`GET /v1/library`、`GET /v1/thumbnail/{id}`、`GET /v1/video/{id}`（支持 Range）。除配对外都需令牌；文件只按资料库中存在的视频 ID 定位，不接受请求给出的路径。
 - 导入：下载直接写入导入暂存目录（`catalog.ImportFrom`），与本地导入相同地原生验证、生成缩略图、改名发布，失败或取消不留半成品；完成后加入资料库与播放列表末尾。扩展只播放本地副本，从不读网络。

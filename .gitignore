@@ -76,6 +76,6 @@ build/
 # Coverage output
 *.profraw
 
-# Phosphene Go local builds
+# Loopwall local builds
 dist/
 .mygo/

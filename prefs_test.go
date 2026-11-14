@@ -1,6 +1,8 @@
 package main
 
 import (
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/egoist/mygo/ui"
@@ -30,5 +32,31 @@ func TestLookFor(t *testing.T) {
 		if got := lookFor(key).label; got != want {
 			t.Errorf("lookFor(%q) = %s, want %s", key, got, want)
 		}
+	}
+}
+
+func TestMoveFiles(t *testing.T) {
+	from, to := t.TempDir(), filepath.Join(t.TempDir(), "Loopwall")
+	for name, body := range map[string]string{"settings.json": "old", "share.json": "old", "other": "x"} {
+		if err := os.WriteFile(filepath.Join(from, name), []byte(body), 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.MkdirAll(to, 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(to, "share.json"), []byte("new"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := moveFiles(from, to, userDataFiles...); err != nil {
+		t.Fatal(err)
+	}
+	for name, want := range map[string]string{"settings.json": "old", "share.json": "new"} {
+		if b, _ := os.ReadFile(filepath.Join(to, name)); string(b) != want {
+			t.Errorf("%s: %q, want %q", name, b, want)
+		}
+	}
+	if _, err := os.Stat(filepath.Join(to, "other")); err == nil {
+		t.Error("moved a file not the app's")
 	}
 }

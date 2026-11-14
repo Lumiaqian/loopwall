@@ -46,7 +46,7 @@ type Host interface {
 	// ComputerName is the name this Mac goes by on the network.
 	ComputerName() (string, error)
 	// Advertise publishes the library shared on port as the Bonjour
-	// service _phosphenego._tcp named name, whose TXT record carries
+	// service _loopwall._tcp named name, whose TXT record carries
 	// device; advertising again replaces it.
 	Advertise(name string, port int64, device string) error
 	// StopAdvertising withdraws what Advertise published.

@@ -22,7 +22,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/Lumiaqian/phosphene-go/internal/catalog"
+	"github.com/Lumiaqian/loopwall/internal/catalog"
 )
 
 // Granted is a device paired to pull from this Mac.
@@ -192,7 +192,7 @@ func (st *Store) Certificate() (tls.Certificate, error) {
 	}
 	tmpl := &x509.Certificate{
 		SerialNumber: serial,
-		Subject:      pkix.Name{CommonName: "Phosphene Go " + st.Device()},
+		Subject:      pkix.Name{CommonName: "Loopwall " + st.Device()},
 		NotBefore:    time.Now().Add(-time.Hour),
 		NotAfter:     time.Now().AddDate(20, 0, 0),
 		KeyUsage:     x509.KeyUsageDigitalSignature,

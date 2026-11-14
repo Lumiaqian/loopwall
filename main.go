@@ -17,8 +17,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/Lumiaqian/phosphene-go/internal/catalog"
-	"github.com/Lumiaqian/phosphene-go/internal/platform"
+	"github.com/Lumiaqian/loopwall/internal/catalog"
+	"github.com/Lumiaqian/loopwall/internal/platform"
 	"github.com/egoist/mygo"
 	"github.com/egoist/mygo/ui"
 	"github.com/egoist/mygo/ui/video"
@@ -51,7 +51,7 @@ type application struct {
 }
 
 func main() {
-	mygo.App.SetName("Phosphene Go")
+	mygo.App.SetName("Loopwall")
 	if !mygo.App.RequestSingleInstanceLock() {
 		return
 	}
@@ -72,6 +72,16 @@ func main() {
 			mygo.Dialog.Error("无法加载原生模块", err.Error())
 			mygo.App.Quit()
 			return
+		}
+		// Once, the library and settings the app kept as Phosphene Go.
+		var migrated []string
+		if moved, err := catalog.Migrate(catalog.LegacyRoot(), app.root); err != nil {
+			migrated = append(migrated, "资料库迁移失败："+err.Error())
+		} else if moved {
+			migrated = append(migrated, "已从 Phosphene Go 迁移资料库")
+		}
+		if err := migrateUserData(); err != nil {
+			migrated = append(migrated, "设置迁移失败："+err.Error())
 		}
 		app.config, err = catalog.Load(app.root)
 		if err != nil {
@@ -101,8 +111,14 @@ func main() {
 		}
 		app.loadThumbnails()
 		app.reapLater()
+		if len(migrated) > 0 {
+			app.status = strings.Join(migrated, "；")
+			if err := app.host.NotifyLibraryChanged(); err != nil {
+				log.Println(err)
+			}
+		}
 		app.setupSharing()
-		tray, err := mygo.NewTray(mygo.TrayOptions{Icon: trayIcon(), IconIsTemplate: true, ToolTip: "Phosphene Go", Menu: mygo.NewMenu([]*mygo.MenuItem{
+		tray, err := mygo.NewTray(mygo.TrayOptions{Icon: trayIcon(), IconIsTemplate: true, ToolTip: "Loopwall", Menu: mygo.NewMenu([]*mygo.MenuItem{
 			{Label: "打开资料库", Click: func(*mygo.MenuItem, *mygo.Window) { app.open() }},
 			{Label: "系统墙纸设置", Click: func(*mygo.MenuItem, *mygo.Window) { openWallpaperSettings() }},
 			{Label: "修复壁纸（重建墙纸服务）", Click: func(*mygo.MenuItem, *mygo.Window) { app.repairWallpaper("正在重建墙纸服务…", time.Now()) }},
@@ -151,7 +167,7 @@ func (a *application) open() {
 		return
 	}
 	a.window = mygo.NewWindow(mygo.WindowOptions{
-		Title: "Phosphene Go", Width: 1100, Height: 760, MinWidth: 760, MinHeight: 520,
+		Title: "Loopwall", Width: 1100, Height: 760, MinWidth: 760, MinHeight: 520,
 		TitleBarStyle: mygo.TitleBarHiddenInset, TitleBarHeight: titleBarHeight,
 		Content: ui.View(a.view),
 	})

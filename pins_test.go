@@ -4,8 +4,8 @@ import (
 	"context"
 	"testing"
 
-	"github.com/Lumiaqian/phosphene-go/internal/catalog"
-	"github.com/Lumiaqian/phosphene-go/internal/platform"
+	"github.com/Lumiaqian/loopwall/internal/catalog"
+	"github.com/Lumiaqian/loopwall/internal/platform"
 )
 
 // fakeHost stands in for the native module, counting the library notices.

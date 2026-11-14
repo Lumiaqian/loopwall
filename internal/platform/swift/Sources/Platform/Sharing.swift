@@ -10,9 +10,9 @@ import Network
 /// and the browser, the registration and the connections run on it.
 final class LocalSharing: @unchecked Sendable {
     static let shared = LocalSharing()
-    private static let serviceType = "_phosphenego._tcp"
+    private static let serviceType = "_loopwall._tcp"
 
-    private let queue = DispatchQueue(label: "local.lumiaqian.phosphenego.sharing")
+    private let queue = DispatchQueue(label: "local.lumiaqian.loopwall.sharing")
     private var service: DNSServiceRef?
     private var browser: NWBrowser?
     /// Resolved peers, by service name.
@@ -135,7 +135,7 @@ final class LocalSharing: @unchecked Sendable {
     }
 
     private static func failure(_ message: String) -> NSError {
-        NSError(domain: "PhospheneGo", code: 10, userInfo: [NSLocalizedDescriptionKey: message])
+        NSError(domain: "Loopwall", code: 10, userInfo: [NSLocalizedDescriptionKey: message])
     }
 }
 
@@ -146,7 +146,7 @@ extension NativeHost {
 
     func advertise(name: String, port: Int64, device: String) throws {
         guard let port = UInt16(exactly: port), port > 0 else {
-            throw NSError(domain: "PhospheneGo", code: 11, userInfo: [NSLocalizedDescriptionKey: "端口无效"])
+            throw NSError(domain: "Loopwall", code: 11, userInfo: [NSLocalizedDescriptionKey: "端口无效"])
         }
         try LocalSharing.shared.advertise(name: name, port: port, device: device)
     }

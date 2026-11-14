@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/Lumiaqian/phosphene-go/internal/share"
+	"github.com/Lumiaqian/loopwall/internal/share"
 	"github.com/egoist/mygo/ui"
 )
 
@@ -30,7 +30,7 @@ func (a *application) nearbyView(c *ui.Context) {
 				emptyState(c, iconNearby, "局域网共享不可用", "无法读取共享设置，请重新打开 App。")
 			case len(s.peers) == 0:
 				emptyState(c, iconNearby, "正在查找附近的 Mac…",
-					"在另一台 Mac 的 Phosphene Go 中打开「设置 → 局域网共享」，它就会出现在这里。\n第一次查找时 macOS 会询问是否允许访问本地网络，请选择允许。")
+					"在另一台 Mac 的 Loopwall 中打开「设置 → 局域网共享」，它就会出现在这里。\n第一次查找时 macOS 会询问是否允许访问本地网络，请选择允许。")
 			default:
 				for _, p := range s.peers {
 					a.peerSection(c, p)

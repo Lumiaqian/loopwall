@@ -1,17 +1,17 @@
 {
-  "name": "Phosphene Go",
-  "slug": "phosphene-go",
-  "identifier": "local.lumiaqian.phosphenego",
+  "name": "Loopwall",
+  "slug": "loopwall",
+  "identifier": "local.lumiaqian.loopwall",
   "version": "0.1.0",
-  "copyright": "Copyright 2026 Phosphene Go contributors; based on Phosphene by kageroumado",
+  "copyright": "Copyright 2026 Loopwall contributors; based on Phosphene by kageroumado",
   "license": "MIT",
   "macos": {
     "minimumSystemVersion": "26.0",
     "signingIdentity": "-",
-    "icon": "resources/Phosphene.icon"
+    "icon": "resources/Loopwall.icon"
   },
   "urlSchemes": [
-    "phosphenego"
+    "loopwall"
   ],
   "icon": "resources/icon.png"
 }

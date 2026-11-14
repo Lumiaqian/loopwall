@@ -22,7 +22,7 @@
 | 原生桥 | `go tool mygo native check modules/platform` 通过；原生探测拒绝测试损坏文件，返回 `Cannot Open`；实际导入五段正常 |
 | 格式与 lint | SwiftFormat 全项目检查通过；SwiftLint 无错误，保留长度/复杂度等警告；Go 格式检查和 vet 通过 |
 | 完整构建 | `scripts/install-local.sh` 的测试、MyGO 构建、扩展 Release 构建和本地安装均通过。Swift 编译无源代码警告，仅 Xcode 的 AppIntents 元数据跳过提示 |
-| 签名及加载路径 | 宿主和扩展 `codesign --verify --deep --strict` 通过，均为 ad-hoc；扩展启用 sandbox；PlugInKit 仅注册安装目录的一个新扩展，实际进程路径位于 `~/Applications/Phosphene Go.app/Contents/Extensions/PhospheneExtension.appex` |
+| 签名及加载路径 | 宿主和扩展 `codesign --verify --deep --strict` 通过，均为 ad-hoc；扩展启用 sandbox；PlugInKit 仅注册安装目录的一个新扩展，实际进程路径位于 `~/Applications/Loopwall.app/Contents/Extensions/LoopwallExtension.appex` |
 | 回退入口 | 原 `/Applications/Phosphene.app`、旧助手和原素材保留；旧助手当前已退出。旧开发测试应用已注销并压缩归档，避免旧构建被系统选中 |
 
 本机详细构建日志、模式采样和签名输出保留在 `build/`，不上传个人运行配置和日志。初始原片与视频帧不在 Git 仓库中。
