@@ -2,7 +2,7 @@
 
 本地视频动态壁纸应用。使用 **MyGO v0.9.0 的 Go 原生界面**管理资料库，由独立的 **Swift 墙纸扩展**播放。基于 [Phosphene v1.11.4](https://github.com/kageroumado/phosphene/tree/v1.11.4)，保留原 MIT 版权声明。
 
-面向 Apple Silicon、macOS 26+ 的个人使用。当前实机环境为 macOS 27.0.1；其他系统版本的验证边界见 [验收记录](docs/VALIDATION.md)。
+面向 Apple Silicon、macOS 26+ 的个人使用。当前实机环境为 macOS 27.0.1；哪些行为已在真机确认、哪些还没有，见 [真机验证状态](docs/VALIDATION.md)。
 
 ## 使用
 
@@ -47,7 +47,7 @@ open -n -W "$HOME/Applications/Loopwall.app" --args --import "/absolute/path/vid
 - `internal/platform`：Swift 原生媒体探测、缩略图、稳定显示器标识与变更通知。桥接代码由 MyGO 生成。
 - `LoopwallExtension`：系统接入、原生解码、独立轮播、锁屏亮屏及尺寸恢复。
 - [设计系统](docs/design/README.md)：界面文案、Liquid Glass 分层、颜色与字体 token、组件规范；`design_test.go` 校验 token 与代码一致。
-- [跨语言契约与播放状态](docs/ARCHITECTURE.md)、[使用及回退](docs/USAGE.md)、[实机验收记录](docs/VALIDATION.md)。
+- [跨语言契约与播放状态](docs/ARCHITECTURE.md)、[使用说明](docs/USAGE.md)、[真机验证状态](docs/VALIDATION.md)。
 
 身份为 `local.lumiaqian.loopwall` 和 `local.lumiaqian.loopwall.extension`。数据位于：
 
