@@ -1,0 +1,99 @@
+# Tests, lints and packages Loopwall on every push and pull request; a tag
+# vX.Y.Z also publishes the package as a GitHub release. The app is signed
+# ad hoc, as scripts/build-local.sh signs it: no Developer ID, no notarization.
+name: Build
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    # macOS 27 with Xcode 27: the SDK and Swift the extension and the
+    # native module are built with, and Icon Composer's ictool for the icon.
+    runs-on: xcode-27
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Tools
+        run: |
+          xcodebuild -version
+          go version
+          brew install swiftformat swiftlint
+
+      - name: Native bridge is up to date
+        run: |
+          go tool mygo native check internal/platform
+          git diff --exit-code -- internal/platform
+
+      - name: Test
+        run: scripts/test.sh
+
+      - name: Lint
+        run: |
+          test -z "$(gofmt -l .)"
+          swiftformat --lint .
+          swiftlint lint --quiet LoopwallExtension internal/platform/swift/Sources/Platform tests
+
+      - name: Build
+        run: scripts/build-local.sh
+
+      - name: Package
+        id: package
+        run: |
+          version=$(python3 -c 'import json; print(json.load(open("mygo.json"))["version"])')
+          if [[ "$GITHUB_REF" == refs/tags/v* && "${GITHUB_REF_NAME#v}" != "$version" ]]; then
+            echo "::error::tag $GITHUB_REF_NAME does not match mygo.json version $version"
+            exit 1
+          fi
+          name="Loopwall-$version-arm64.zip"
+          ditto -c -k --keepParent "dist/darwin-arm64/Loopwall.app" "$name"
+          shasum -a 256 "$name" | tee "$name.sha256"
+          echo "name=$name" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Loopwall-arm64
+          path: |
+            ${{ steps.package.outputs.name }}
+            ${{ steps.package.outputs.name }}.sha256
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Extension build log
+        if: failure()
+        run: tail -n 200 build/extension-build.log || true
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: Loopwall-arm64
+
+      - name: Publish the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" Loopwall-*.zip Loopwall-*.zip.sha256 \
+            --repo "$GITHUB_REPOSITORY" --title "Loopwall ${GITHUB_REF_NAME#v}" --generate-notes \
+            --notes "Apple Silicon、macOS 26 及以上。本构建为 ad-hoc 签名、未经公证：解压后把 Loopwall.app 放进「应用程序」，首次打开若被拦截，到「系统设置 → 隐私与安全性」点「仍要打开」，或运行 \`xattr -dr com.apple.quarantine /Applications/Loopwall.app\`。然后在系统墙纸设置里选择「Loopwall 轮播」。"
