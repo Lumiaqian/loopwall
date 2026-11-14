@@ -21,7 +21,7 @@ Go 是资料库和配置的唯一产品写入方，Swift 扩展是进度的唯�
 
 `MediaEntry` 保存 `id`、`name`、`filename`、`width`、`height`、`durationSeconds`、`frameRate`、`addedAtUnix`。ID 为 UUID，文件名必须是安全的单个路径组件。原片在 `videos/<id>/<filename>`，缩略图为同目录 `thumbnail.jpg`。
 
-`PlaylistSpec` 保存 `videoIDs`、`advanceMode`（`end` 或 `duration`）、`intervalSeconds`（正整数）和 `keepAwakeWhenLockedOnAC`。
+`PlaylistSpec` 保存 `videoIDs`、`advanceMode`（`end` 或 `duration`）、`intervalSeconds`（正整数）、`keepAwakeWhenLockedOnAC`，以及可选的 `pins`：显示器 UUID → 资料库中的视频 ID。被固定的显示器只循环该视频，其余显示器播放列表；固定的视频无法解码或文件缺失时，该屏退回播放列表而不黑屏。字段可省略，旧配置无需迁移，`schemaVersion` 仍为 1。
 
 `runtime.json` 保存 `schemaVersion`、`appliedRevision`、`updatedAtUnix`、`ruleSignature`、`displays`、`activeDisplayKeys`、`openVideoIDs`、`keepAwakeActive`、`errors`。每个 `DisplayProgress` 保存 `displayKey`、`videoID`、`positionSeconds`、`itemElapsedSeconds`。
 
@@ -31,7 +31,7 @@ Go 通过同目录临时文件、同步并原子 rename 发布配置；扩展通
 
 导入复制到隐藏临时目录，原生验证视频轨道、真实尺寸、时长以及能否解码首帧，完成后再改名为 UUID 目录，发布配置后才进入列表。失败不改动原片，也不会向配置暴露半成品。
 
-删除将素材从资料库索引和播放列表移除，并在同一份原子配置中记录其 ID。扩展先切到下一个可播放项目；只有其确认新配置、运行记录仍新鲜、且所有原生读者不再持有该 ID 后，管理端才清理资料库副本。清理只处理显式删除记录，绝不把尚未发布的批量导入文件当作垃圾。
+删除将素材从资料库索引、播放列表和指向它的 `pins` 中移除，并在同一份原子配置中记录其 ID。扩展先切到下一个可播放项目；只有其确认新配置、运行记录仍新鲜、且所有原生读者不再持有该 ID 后，管理端才清理资料库副本。清理只处理显式删除记录，绝不把尚未发布的批量导入文件当作垃圾。
 
 列表为空时保留已经显示的末帧，并在管理端提示。如果末帧仍由旧原片支持，副本会暂留到播放器真正释放该素材。原始文件和原 Phosphene 的资料库均不参与清理。
 

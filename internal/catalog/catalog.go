@@ -34,6 +34,9 @@ type PlaylistSpec struct {
 	AdvanceMode             string   `json:"advanceMode"`
 	IntervalSeconds         int      `json:"intervalSeconds"`
 	KeepAwakeWhenLockedOnAC bool     `json:"keepAwakeWhenLockedOnAC"`
+	// Pins maps a display's UUID to the one video it plays instead of the
+	// playlist. Optional, so configurations written before it read unchanged.
+	Pins map[string]string `json:"pins,omitempty"`
 }
 type Config struct {
 	// RemovedMediaIDs records explicit deletions. Unpublished imports are never cleanup candidates.
@@ -108,6 +111,11 @@ func (c Config) Validate() error {
 			return errors.New("playlist contains missing or duplicate media")
 		}
 		seen[id] = true
+	}
+	for display, id := range c.Playlist.Pins {
+		if display == "" || !ids[id] {
+			return errors.New("a display is pinned to missing media")
+		}
 	}
 	return nil
 }

@@ -48,7 +48,8 @@ func TestContracts(t *testing.T) {
 		if e = got.Validate(); e != nil {
 			t.Fatal(e)
 		}
-		if got.Media[0].Name != c.Media[0].Name || got.Media[1].FrameRate != 29.97 || got.Playlist.IntervalSeconds != 60 {
+		if got.Media[0].Name != c.Media[0].Name || got.Media[1].FrameRate != 29.97 || got.Playlist.IntervalSeconds != 60 ||
+			len(got.Playlist.Pins) != 1 || got.Playlist.Pins["display-A"] != c.Media[2].ID {
 			t.Fatal("Swift round trip changed data")
 		}
 	}
@@ -62,7 +63,7 @@ func TestContracts(t *testing.T) {
 		}
 	}
 
-	for _, change := range []func(*Config){func(c *Config) { c.SchemaVersion = 2 }, func(c *Config) { c.Playlist.IntervalSeconds = 0 }, func(c *Config) { c.Playlist.AdvanceMode = "random" }, func(c *Config) { c.Media[0].Filename = "../escape.mp4" }, func(c *Config) { c.Media[0].ID = "not-a-uuid" }, func(c *Config) { c.Playlist.VideoIDs = append(c.Playlist.VideoIDs, "missing") }, func(c *Config) { c.Media[0].DurationSeconds = 0 }} {
+	for _, change := range []func(*Config){func(c *Config) { c.SchemaVersion = 2 }, func(c *Config) { c.Playlist.IntervalSeconds = 0 }, func(c *Config) { c.Playlist.AdvanceMode = "random" }, func(c *Config) { c.Media[0].Filename = "../escape.mp4" }, func(c *Config) { c.Media[0].ID = "not-a-uuid" }, func(c *Config) { c.Playlist.VideoIDs = append(c.Playlist.VideoIDs, "missing") }, func(c *Config) { c.Media[0].DurationSeconds = 0 }, func(c *Config) { c.Playlist.Pins["display-B"] = "missing" }, func(c *Config) { c.Playlist.Pins[""] = c.Media[0].ID }} {
 		bad := fixture(t)
 		change(&bad)
 		if bad.Validate() == nil {

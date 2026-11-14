@@ -253,7 +253,11 @@ func (a *application) mediaCard(c *ui.Context, m catalog.MediaEntry) {
 			}
 			ui.Column(c).Gap(2).Grow(1).MinWidth(0).Children(func() {
 				current.onBackdrop(c, ui.Text(c, m.Name).FontSize(13).FontWeight(600).SingleLine(), false)
-				current.onBackdrop(c, ui.Text(c, fmt.Sprintf("%s · %s fps", resolution(m.Width, m.Height), trimFloat(m.FrameRate))).FontSize(11).SingleLine(), true)
+				meta := fmt.Sprintf("%s · %s fps", resolution(m.Width, m.Height), trimFloat(m.FrameRate))
+				if on := a.pinnedOn(m.ID); len(on) > 0 {
+					meta += " · 固定在 " + strings.Join(on, "、")
+				}
+				current.onBackdrop(c, ui.Text(c, meta).FontSize(11).SingleLine(), true)
 			})
 			if order >= 0 {
 				iconButton(c, iconCheck, "移出轮播").TextColor(t.Accent).Disabled(a.busy).OnClick(func() { a.togglePlaylist(m.ID) })
@@ -267,6 +271,22 @@ func (a *application) mediaCard(c *ui.Context, m catalog.MediaEntry) {
 				if menu.Item("重命名…").Chosen() {
 					a.selected, a.rename = m.ID, m.Name
 				}
+				menu.Submenu("设为壁纸", func(sub *ui.Menu) {
+					for _, d := range a.displays {
+						on := a.config.Playlist.Pins[d.Identifier] == m.ID
+						if sub.Item(d.Name).ID("wall-" + d.Identifier).Checked(on).Chosen() {
+							if on {
+								a.pinDisplay(d.Identifier, "") // chosen again: back to the playlist
+							} else {
+								a.pinDisplay(d.Identifier, m.ID)
+							}
+						}
+					}
+					sub.Separator()
+					if sub.Item("所有显示器").Chosen() {
+						a.pinAll(m.ID)
+					}
+				}).Disabled(len(a.displays) == 0)
 				menu.Separator()
 				if menu.Item("从资料库删除…").Chosen() {
 					a.deleteMedia(m)
@@ -438,8 +458,74 @@ func (a *application) displayCard(c *ui.Context, key, name string, builtIn bool)
 			} else {
 				ui.Text(c, s.detail()).FontSize(11).TextColor(t.TextMuted)
 			}
+			a.pinButton(c, key)
 		})
 	})
+}
+
+// pinButton chooses what display key plays: the playlist, or one video of
+// the library, looped.
+func (a *application) pinButton(c *ui.Context, key string) {
+	pinned := a.config.Playlist.Pins[key]
+	label := "播放：轮播"
+	if m, ok := a.entry(pinned); ok {
+		label = "固定：" + shorten(m.Name, 14)
+	}
+	ui.Row(c).Margin(4, 0, 0, 0).Children(func() {
+		glassButton(c, iconPlaylist, label, false).Disabled(a.busy).Menu(func(menu *ui.Menu) {
+			if menu.Item("轮播播放列表").Radio(pinned == "").Chosen() {
+				a.pinDisplay(key, "")
+			}
+			menu.Separator()
+			for _, m := range a.config.Media {
+				if menu.Item(m.Name).ID("pin-" + m.ID).Radio(pinned == m.ID).Chosen() {
+					a.pinDisplay(key, m.ID)
+				}
+			}
+		})
+	})
+}
+
+// pinDisplay makes display key loop video id alone, or play the playlist
+// when id is empty.
+func (a *application) pinDisplay(key, id string) {
+	if a.busy || a.config.Playlist.Pins[key] == id {
+		return
+	}
+	if id == "" {
+		delete(a.config.Playlist.Pins, key)
+	} else {
+		if a.config.Playlist.Pins == nil {
+			a.config.Playlist.Pins = map[string]string{}
+		}
+		a.config.Playlist.Pins[key] = id
+	}
+	a.save()
+}
+
+// pinAll makes every display loop video id alone, saving once.
+func (a *application) pinAll(id string) {
+	if a.busy || len(a.displays) == 0 {
+		return
+	}
+	if a.config.Playlist.Pins == nil {
+		a.config.Playlist.Pins = map[string]string{}
+	}
+	for _, d := range a.displays {
+		a.config.Playlist.Pins[d.Identifier] = id
+	}
+	a.save()
+}
+
+// pinnedOn names the displays that loop video id alone.
+func (a *application) pinnedOn(id string) []string {
+	var names []string
+	for _, d := range a.displays {
+		if a.config.Playlist.Pins[d.Identifier] == id {
+			names = append(names, d.Name)
+		}
+	}
+	return names
 }
 
 func (a *application) applyInterval() {
@@ -675,6 +761,15 @@ func shortPath(p string) string {
 		return "~" + strings.TrimPrefix(p, home)
 	}
 	return p
+}
+
+// shorten cuts s to n characters, ending it with an ellipsis.
+func shorten(s string, n int) string {
+	r := []rune(s)
+	if len(r) <= n {
+		return s
+	}
+	return string(r[:n-1]) + "…"
 }
 
 func clock(sec float64) string {
