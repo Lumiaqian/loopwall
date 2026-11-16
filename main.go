@@ -20,6 +20,8 @@ import (
 	"github.com/Lumiaqian/loopwall/internal/catalog"
 	"github.com/Lumiaqian/loopwall/internal/platform"
 	"github.com/egoist/mygo"
+	"github.com/egoist/mygo/plugins/updater"
+	updatenative "github.com/egoist/mygo/plugins/updater/native"
 	"github.com/egoist/mygo/ui"
 )
 
@@ -51,6 +53,9 @@ type application struct {
 
 func main() {
 	mygo.App.SetName("Loopwall")
+	// Updates, asked before they install (update.go).
+	mygo.Use(updatenative.Plugin)
+	updatesUsed = true
 	if !mygo.App.RequestSingleInstanceLock() {
 		return
 	}
@@ -117,9 +122,16 @@ func main() {
 			}
 		}
 		app.setupSharing()
+		// Install updates only when asked, then relaunch at once, so the
+		// wallpaper's extension never waits on a bundle replaced unseen.
+		updater.SetAutomaticDownloads(false)
+		version := mygo.App.Version()
+		app.checkExtension(app.launchedVersion(version), version)
+		updater.OnInstalled(guardRelaunch)
 		tray, err := mygo.NewTray(mygo.TrayOptions{Icon: trayIcon(), IconIsTemplate: true, ToolTip: "Loopwall", Menu: mygo.NewMenu([]*mygo.MenuItem{
 			{Label: "打开资料库", Click: func(*mygo.MenuItem, *mygo.Window) { app.open() }},
 			{Label: "系统墙纸设置", Click: func(*mygo.MenuItem, *mygo.Window) { openWallpaperSettings() }},
+			updater.MenuItem(),
 			{Label: "修复壁纸（重建墙纸服务）", Click: func(*mygo.MenuItem, *mygo.Window) { app.repairWallpaper("正在重建墙纸服务…", time.Now()) }},
 			mygo.Separator(), {Label: "退出管理端（壁纸继续播放）", Click: func(*mygo.MenuItem, *mygo.Window) { mygo.App.Quit() }},
 		})})

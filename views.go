@@ -12,6 +12,7 @@ import (
 	"github.com/Lumiaqian/loopwall/internal/catalog"
 	"github.com/egoist/mygo"
 	"github.com/egoist/mygo/plugins/glass"
+	"github.com/egoist/mygo/plugins/updater"
 	"github.com/egoist/mygo/ui"
 )
 
@@ -615,6 +616,14 @@ func (a *application) settingsView(c *ui.Context) {
 								a.login = mygo.App.OpenAtLogin()
 							}
 						}
+					})
+					ui.Divider(c)
+					groupRow(c, "软件更新", updateDetail(), func() {
+						glassButton(c, nil, "检查更新", false).Disabled(!updatesUsed).OnClick(func() {
+							if updatesUsed {
+								updater.CheckForUpdates()
+							}
+						})
 					})
 				})
 			})
