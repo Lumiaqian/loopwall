@@ -17,6 +17,8 @@ type prefs struct {
 	Accent     string `json:"accent,omitempty"`     // a key of accents; empty is the first
 	Glass      string `json:"glass,omitempty"`      // a key of looks; empty is the standard
 	Share      bool   `json:"share,omitempty"`      // share the library on the local network
+	// LastVersion is the version the app last launched as (update.go).
+	LastVersion string `json:"lastVersion,omitempty"`
 }
 
 // appearances are the choices of prefs.Appearance, in the order the
@@ -101,15 +103,20 @@ func loadPrefs() prefs {
 // windows, menus and dialogs.
 func (a *application) savePrefs() {
 	mygo.Theme.SetSource(a.prefs.themeSource())
+	if err := writePrefs(a.prefs); err != nil {
+		a.status = "设置保存失败：" + err.Error()
+	}
+}
+
+// writePrefs writes the settings to settings.json; tests replace it.
+var writePrefs = func(p prefs) error {
 	path, err := prefsPath()
 	if err == nil {
 		if err = os.MkdirAll(filepath.Dir(path), 0o755); err == nil {
-			err = catalog.AtomicJSON(path, a.prefs)
+			err = catalog.AtomicJSON(path, p)
 		}
 	}
-	if err != nil {
-		a.status = "设置保存失败：" + err.Error()
-	}
+	return err
 }
 
 func (p prefs) themeSource() mygo.ThemeSource {

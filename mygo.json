@@ -13,5 +13,10 @@
   "urlSchemes": [
     "loopwall"
   ],
-  "icon": "resources/icon.png"
+  "icon": "resources/icon.png",
+  "updates": {
+    "publicKey": "/6fV7aPcvK0KwGhrbtoepli1SSJYC9MAZRoqrdbrWHw=",
+    "github": "Lumiaqian/loopwall",
+    "deltas": 0
+  }
 }
