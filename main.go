@@ -21,7 +21,6 @@ import (
 	"github.com/Lumiaqian/loopwall/internal/platform"
 	"github.com/egoist/mygo"
 	"github.com/egoist/mygo/ui"
-	"github.com/egoist/mygo/ui/video"
 )
 
 type application struct {
@@ -351,27 +350,6 @@ func (a *application) entry(id string) (catalog.MediaEntry, bool) {
 		}
 	}
 	return catalog.MediaEntry{}, false
-}
-func (a *application) previewMedia(m catalog.MediaEntry) {
-	if a.previewWindow != nil {
-		a.previewWindow.Close()
-	}
-	p, err := video.Open(catalog.VideoPath(a.root, m))
-	if err != nil {
-		a.status = err.Error()
-		return
-	}
-	p.SetLoop(true).SetMuted(true)
-	a.preview = p
-	w := mygo.NewWindow(mygo.WindowOptions{Title: m.Name + " · 预览", Width: 960, Height: 580, Content: ui.View(func(c *ui.Context) { ui.Video(c, p).Fill().Fit(ui.Contain) })})
-	a.previewWindow = w
-	w.OnClosed(func() {
-		p.Close()
-		if a.previewWindow == w {
-			a.previewWindow = nil
-			a.preview = nil
-		}
-	})
 }
 func (a *application) deleteMedia(m catalog.MediaEntry) {
 	if a.busy {
