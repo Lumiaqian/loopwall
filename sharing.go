@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/Lumiaqian/loopwall/internal/catalog"
+	"github.com/Lumiaqian/loopwall/internal/platform"
 	"github.com/Lumiaqian/loopwall/internal/share"
 	"github.com/egoist/mygo"
 	"github.com/egoist/mygo/ui"
@@ -39,6 +40,36 @@ type sharing struct {
 	codes    map[string]*string    // pairing codes being typed, by device
 	pairing  map[string]bool       // pairings under way, by device
 	thumbs   map[string]*ui.Bitmap // peers' thumbnails, by "device/id"
+	// status is how publishing and browsing fare, as the ticker last read it.
+	status platform.SharingStatus
+}
+
+// localNetworkSettings opens Privacy & Security's Local Network list,
+// where Loopwall is allowed to publish and browse.
+const localNetworkSettings = "x-apple.systempreferences:com.apple.preference.security?Privacy_LocalNetwork"
+
+// publishNote says in a line how publishing this Mac fares, and whether
+// that is a problem: Bonjour fails silently but for what it reports.
+func publishNote(st platform.SharingStatus, name string) (string, bool) {
+	switch {
+	case st.AdvertiseError != "":
+		return "其他 Mac 暂时看不到这台：" + st.AdvertiseError + "，会自动重试", true
+	case st.Advertised:
+		return "其他 Mac 的「附近的 Mac」里会出现「" + name + "」", false
+	default:
+		return "正在发布到局域网…", false
+	}
+}
+
+// browseProblem is why looking for Macs fails, empty while it does not.
+func browseProblem(st platform.SharingStatus) string {
+	if st.Browsing == "waiting" || st.Browsing == "failed" {
+		if st.BrowseError == "" {
+			return "等待网络"
+		}
+		return st.BrowseError
+	}
+	return ""
 }
 
 // remote is what a peer shares, as last listed.
