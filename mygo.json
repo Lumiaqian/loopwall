@@ -2,7 +2,7 @@
   "name": "Loopwall",
   "slug": "loopwall",
   "identifier": "local.lumiaqian.loopwall",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "copyright": "Copyright 2026 Loopwall contributors; based on Phosphene by kageroumado",
   "license": "MIT",
   "macos": {
