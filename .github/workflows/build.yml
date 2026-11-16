@@ -61,6 +61,11 @@ jobs:
             echo "::error::tag $GITHUB_REF_NAME does not match mygo.json version $version"
             exit 1
           fi
+          extension=$(/usr/libexec/PlistBuddy -c "Print :CFBundleShortVersionString" "dist/darwin-arm64/Loopwall.app/Contents/Extensions/LoopwallExtension.appex/Contents/Info.plist")
+          if [[ "$extension" != "$version" ]]; then
+            echo "::error::the extension's MARKETING_VERSION $extension does not match mygo.json version $version"
+            exit 1
+          fi
           name="Loopwall-$version-arm64.zip"
           ditto -c -k --keepParent "dist/darwin-arm64/Loopwall.app" "$name"
           shasum -a 256 "$name" | tee "$name.sha256"
