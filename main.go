@@ -136,9 +136,16 @@ func main() {
 				displays, err := app.host.Displays()
 				stuck, _ := app.host.AgentStuckSignals()
 				peers, browsing := app.findPeers()
+				var sharingStatus platform.SharingStatus
+				if app.share != nil {
+					sharingStatus, _ = app.host.SharingStatus()
+				}
 				mygo.RunOnMain(func() {
 					if browsing {
 						app.setPeers(peers)
+					}
+					if app.share != nil {
+						app.share.status = sharingStatus
 					}
 					app.runtime = r
 					app.observeWallpaper(r, stuck, time.Now())

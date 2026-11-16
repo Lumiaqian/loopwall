@@ -21,6 +21,9 @@ func (h *fakeHost) ComputerName() (string, error)             { return "测试�
 func (h *fakeHost) Advertise(string, int64, string) error     { return nil }
 func (h *fakeHost) StopAdvertising() error                    { return nil }
 func (h *fakeHost) Peers() ([]platform.Peer, error)           { return nil, nil }
+func (h *fakeHost) SharingStatus() (platform.SharingStatus, error) {
+	return platform.SharingStatus{}, nil
+}
 
 func TestPinDisplays(t *testing.T) {
 	root, host := t.TempDir(), &fakeHost{}

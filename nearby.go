@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/Lumiaqian/loopwall/internal/share"
+	"github.com/egoist/mygo"
 	"github.com/egoist/mygo/ui"
 )
 
@@ -28,9 +29,21 @@ func (a *application) nearbyView(c *ui.Context) {
 			switch {
 			case s == nil:
 				emptyState(c, iconNearby, "局域网共享不可用", "无法读取共享设置，请重新打开 App。")
+			case len(s.peers) == 0 && browseProblem(s.status) != "":
+				detail := "查找附近的 Mac 失败：" + browseProblem(s.status) + "。"
+				if s.status.Denied {
+					detail = "Loopwall 没有本地网络权限，看不到也连不上其他 Mac。\n在「系统设置 → 隐私与安全性 → 本地网络」中打开 Loopwall，然后回到这里。"
+				}
+				emptyState(c, iconAlert, "无法查找附近的 Mac", detail)
+				if s.status.Denied {
+					localNetworkButton(c)
+				}
 			case len(s.peers) == 0:
-				emptyState(c, iconNearby, "正在查找附近的 Mac…",
-					"在另一台 Mac 的 Loopwall 中打开「设置 → 局域网共享」，它就会出现在这里。\n第一次查找时 macOS 会询问是否允许访问本地网络，请选择允许。")
+				detail := "在另一台 Mac 的 Loopwall 中打开「设置 → 局域网共享」，它就会出现在这里。\n第一次查找时 macOS 会询问是否允许访问本地网络，请选择允许。"
+				if a.prefs.Share && s.status.Advertised {
+					detail += "\n这台 Mac 在其他 Mac 上显示为「" + s.name + "」。"
+				}
+				emptyState(c, iconNearby, "正在查找附近的 Mac…", detail)
 			default:
 				for _, p := range s.peers {
 					a.peerSection(c, p)
@@ -171,6 +184,23 @@ func (a *application) shareSettings(c *ui.Context) {
 			}
 			if a.prefs.Share && s.err == "" {
 				ui.Divider(c)
+				note, problem := publishNote(s.status, s.name)
+				ui.Row(c).Gap(8).AlignItems(ui.Center).Padding(10, 14).FillWidth().Children(func() {
+					dot := ui.Box(c).Size(7, 7).Radius(4).Shrink(0).Background(t.Success)
+					text := ui.Text(c, note).FontSize(12).Grow(1)
+					switch {
+					case problem:
+						dot.Background(t.Warning)
+						text.TextColor(t.Warning)
+					case !s.status.Advertised:
+						dot.Background(t.TextMuted)
+						text.TextColor(t.TextMuted)
+					}
+					if s.status.Denied {
+						localNetworkButton(c)
+					}
+				})
+				ui.Divider(c)
 				code := s.server.Code()
 				groupRow(c, "配对码", "在另一台 Mac 的「附近的 Mac」中输入；用过一次或连续输错 5 次后会换新的。", func() {
 					if code == "" {
@@ -193,6 +223,16 @@ func (a *application) shareSettings(c *ui.Context) {
 					})
 				})
 			}
+		})
+	})
+}
+
+// localNetworkButton opens the Local Network list of System Settings, where
+// Loopwall gets the permission Bonjour needs.
+func localNetworkButton(c *ui.Context) {
+	ui.Row(c).Center().Children(func() {
+		glassButton(c, iconExternal, "打开本地网络设置", true).OnClick(func() {
+			_ = mygo.Shell.OpenExternal(localNetworkSettings)
 		})
 	})
 }

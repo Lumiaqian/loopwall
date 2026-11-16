@@ -28,6 +28,21 @@ type Peer struct {
 	Port   int64
 }
 
+// SharingStatus is how sharing on the local network fares: whether the
+// Bonjour service is published, how browsing goes, and why either fails.
+type SharingStatus struct {
+	// Advertised is the service published, as Bonjour confirmed it.
+	Advertised bool
+	// AdvertiseError is why publishing failed, empty while it has not.
+	AdvertiseError string
+	// Browsing is the browser's state: "" before it starts, "ready",
+	// "waiting" or "failed".
+	Browsing    string
+	BrowseError string
+	// Denied is the local network permission denied, to publish or browse.
+	Denied bool
+}
+
 // Host exposes the macOS operations needed by the local video library.
 //
 //mygo:native
@@ -55,4 +70,7 @@ type Host interface {
 	// returns those found and resolved so far. Browsing asks for the local
 	// network the first time, so it waits until the user looks for peers.
 	Peers() ([]Peer, error)
+	// SharingStatus reports how publishing and browsing fare, which fail
+	// silently otherwise, as for a denied local network permission.
+	SharingStatus() (SharingStatus, error)
 }
