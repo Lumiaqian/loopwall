@@ -43,11 +43,34 @@ type Client struct {
 func NewClient(store *Store, name string) *Client { return &Client{store: store, name: name} }
 
 // Pair pairs with peer by the code it shows, pinning the certificate it
-// presents.
-func (c *Client) Pair(ctx context.Context, peer Peer, code string) error {
+// presents, and grants it access in return, so that it pulls from this
+// Mac too without a code of this one: a peer before 0.1.3 ignores that.
+func (c *Client) Pair(ctx context.Context, peer Peer, code string) (err error) {
+	cert, err := c.store.Certificate()
+	if err != nil {
+		return err
+	}
+	// Granted before asking, so that the peer may list this Mac at once;
+	// taken back, as it was, if the pairing fails.
+	back := randomHex(32)
+	prev, had := c.store.granted(peer.Device)
+	if err := c.store.Grant(peer.Device, peer.Name, back); err != nil {
+		return err
+	}
+	defer func() {
+		if err == nil {
+			return
+		}
+		if had {
+			_ = c.store.restoreGrant(peer.Device, prev)
+		} else {
+			_ = c.store.Revoke(peer.Device)
+		}
+	}()
 	var seen string
 	hc := httpClient(func(fp string) error { seen = fp; return nil }, 15*time.Second)
-	body, _ := json.Marshal(pairRequest{Device: c.store.Device(), Name: c.name, Code: code})
+	body, _ := json.Marshal(pairRequest{Device: c.store.Device(), Name: c.name, Code: code,
+		Back: &backAccess{Token: back, Fingerprint: Fingerprint(cert.Certificate[0])}})
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, "https://"+peer.Addr+"/v1/pair", bytes.NewReader(body))
 	if err != nil {
 		return err
@@ -68,6 +91,30 @@ func (c *Client) Pair(ctx context.Context, peer Peer, code string) error {
 		return errors.New("配对失败：对方的回应无效")
 	}
 	return c.store.Pair(peer.Device, Paired{Name: peer.Name, Token: pr.Token, Fingerprint: seen})
+}
+
+// Unpair forgets device both ways: it tells the peer at addr, when it is
+// found, to forget this Mac too, and forgets it here whatever the peer
+// answers, as one that is gone answers nothing.
+func (c *Client) Unpair(ctx context.Context, device, addr string) error {
+	var told error
+	if addr != "" {
+		var resp *http.Response
+		resp, told = c.request(ctx, http.MethodPost, Peer{Device: device, Addr: addr}, "/v1/unpair", 10*time.Second)
+		if told == nil {
+			resp.Body.Close()
+		}
+	}
+	if err := c.store.Revoke(device); err != nil {
+		return err
+	}
+	if err := c.store.Unpair(device); err != nil {
+		return err
+	}
+	if errors.Is(told, ErrNotPaired) {
+		return nil // forgotten there already
+	}
+	return told
 }
 
 // Library lists the videos peer shares.
@@ -116,6 +163,11 @@ func (c *Client) Download(ctx context.Context, peer Peer, id string, w io.Writer
 // get makes an authorized request of peer, over its pinned certificate.
 // A timeout of 0 lets it take as long as the context does.
 func (c *Client) get(ctx context.Context, peer Peer, path string, timeout time.Duration) (*http.Response, error) {
+	return c.request(ctx, http.MethodGet, peer, path, timeout)
+}
+
+// request makes an authorized request of peer, as get.
+func (c *Client) request(ctx context.Context, method string, peer Peer, path string, timeout time.Duration) (*http.Response, error) {
 	p, ok := c.store.Paired(peer.Device)
 	if !ok {
 		return nil, ErrNotPaired
@@ -126,7 +178,7 @@ func (c *Client) get(ctx context.Context, peer Peer, path string, timeout time.D
 		}
 		return nil
 	}, timeout)
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, "https://"+peer.Addr+path, nil)
+	req, err := http.NewRequestWithContext(ctx, method, "https://"+peer.Addr+path, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -140,7 +192,7 @@ func (c *Client) get(ctx context.Context, peer Peer, path string, timeout time.D
 		return nil, err
 	}
 	switch resp.StatusCode {
-	case http.StatusOK:
+	case http.StatusOK, http.StatusNoContent:
 		return resp, nil
 	case http.StatusUnauthorized:
 		resp.Body.Close()
