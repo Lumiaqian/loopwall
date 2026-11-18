@@ -7,6 +7,7 @@ import (
 	"strings"
 	"syscall"
 	"testing"
+	"time"
 
 	"github.com/Lumiaqian/loopwall/internal/platform"
 	"github.com/Lumiaqian/loopwall/internal/share"
@@ -58,5 +59,41 @@ func TestSharingNotes(t *testing.T) {
 		if got := browseProblem(c.st); got != c.want {
 			t.Errorf("browseProblem(%+v) = %q, want %q", c.st, got, c.want)
 		}
+	}
+}
+
+// TestMergePeers checks that a Mac Bonjour stops reporting stays listed
+// for a while, rather than flicker away, and then goes; and that what is
+// found now replaces what was, as a peer whose port changed.
+func TestMergePeers(t *testing.T) {
+	now := time.Unix(1_000_000, 0)
+	seen := map[string]time.Time{}
+	a := share.Peer{Name: "甲", Device: "a", Addr: "10.0.0.1:1"}
+	b := share.Peer{Name: "乙", Device: "b", Addr: "10.0.0.2:1"}
+	names := func(ps []share.Peer) string {
+		var s []string
+		for _, p := range ps {
+			s = append(s, p.Name+"@"+p.Addr)
+		}
+		return strings.Join(s, ",")
+	}
+	shown := mergePeers(nil, []share.Peer{b, a}, seen, now)
+	if got := names(shown); got != "乙@10.0.0.2:1,甲@10.0.0.1:1" && got != "甲@10.0.0.1:1,乙@10.0.0.2:1" {
+		t.Fatalf("found both: %s", got)
+	}
+	// b drops out for a tick, and a moves to another port.
+	a2 := a
+	a2.Addr = "10.0.0.1:2"
+	shown = mergePeers(shown, []share.Peer{a2}, seen, now.Add(2*time.Second))
+	if got := names(shown); !strings.Contains(got, "乙@10.0.0.2:1") || !strings.Contains(got, "甲@10.0.0.1:2") || len(shown) != 2 {
+		t.Fatalf("after b dropped out once: %s", got)
+	}
+	// b stays gone past the grace.
+	shown = mergePeers(shown, []share.Peer{a2}, seen, now.Add(peerGrace+time.Second))
+	if got := names(shown); got != "甲@10.0.0.1:2" {
+		t.Fatalf("after b was gone %v: %s", peerGrace, got)
+	}
+	if _, ok := seen["b"]; ok {
+		t.Error("b's time stays remembered")
 	}
 }

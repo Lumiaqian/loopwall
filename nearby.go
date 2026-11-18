@@ -63,12 +63,12 @@ func (a *application) peerSection(c *ui.Context, p share.Peer) {
 			if paired {
 				r := s.remotes[p.Device]
 				glassButton(c, iconRepeat, "刷新", false).Disabled(r != nil && r.loading).OnClick(func() { a.listRemote(p) })
-				glassButton(c, nil, "取消配对", false).OnClick(func() { a.unpair(p) })
+				glassButton(c, nil, "取消配对", false).OnClick(func() { a.unpairDevice(p.Device) })
 			}
 		})
 		if !paired {
 			group(c, func() {
-				groupRow(c, "输入配对码", "在「"+p.Name+"」上打开「设置 → 局域网共享」，输入那里显示的 6 位数字。", func() {
+				groupRow(c, "输入配对码", "在「"+p.Name+"」上打开「设置 → 局域网共享」，输入那里显示的 6 位数字；配对一次，两台都能导入对方的视频。", func() {
 					code := s.code(p.Device)
 					ui.TextInput(c, code).Width(120).Radius(999).Label("配对码").Placeholder("000 000").OnSubmit(func() { a.pair(p) })
 					label := "配对"
@@ -88,7 +88,7 @@ func (a *application) peerSection(c *ui.Context, p share.Peer) {
 			group(c, func() {
 				groupRow(c, "无法读取对方的资料库", friendly(r.err), func() {
 					if errors.Is(r.err, share.ErrNotPaired) || errors.Is(r.err, share.ErrChangedCertificate) {
-						glassButton(c, iconLink, "重新配对", true).OnClick(func() { a.unpair(p) })
+						glassButton(c, iconLink, "重新配对", true).OnClick(func() { a.unpairDevice(p.Device) })
 					} else {
 						glassButton(c, iconRepeat, "重试", false).OnClick(func() { a.listRemote(p) })
 					}
@@ -202,7 +202,7 @@ func (a *application) shareSettings(c *ui.Context) {
 				})
 				ui.Divider(c)
 				code := s.server.Code()
-				groupRow(c, "配对码", "在另一台 Mac 的「附近的 Mac」中输入；用过一次或连续输错 5 次后会换新的。", func() {
+				groupRow(c, "配对码", "在另一台 Mac 的「附近的 Mac」中输入；配对后两台都能导入对方的视频。用过一次或连续输错 5 次后会换新的。", func() {
 					if code == "" {
 						ui.Text(c, "已失效").FontWeight(600).TextColor(t.Warning)
 					} else {
@@ -215,12 +215,12 @@ func (a *application) shareSettings(c *ui.Context) {
 			for _, d := range s.grantedDevices() {
 				g := granted[d]
 				ui.Divider(c)
-				groupRow(c, g.Name, "可以导入你的视频 · "+time.Unix(g.PairedAt, 0).Format("2006-01-02 配对"), func() {
-					glassButton(c, nil, "取消配对", false).OnClick(func() {
-						if err := s.store.Revoke(d); err != nil {
-							a.status = err.Error()
-						}
-					})
+				detail := "可以互相导入视频"
+				if _, both := s.store.Paired(d); !both {
+					detail = "可以导入你的视频；对方是旧版本，升级后重新配对即可双向互通"
+				}
+				groupRow(c, g.Name, detail+" · "+time.Unix(g.PairedAt, 0).Format("2006-01-02 配对"), func() {
+					glassButton(c, nil, "取消配对", false).OnClick(func() { a.unpairDevice(d) })
 				})
 			}
 		})

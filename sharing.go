@@ -35,6 +35,7 @@ type sharing struct {
 	// browsing is read by the ticker, off the main thread.
 	browsing atomic.Bool
 	peers    []share.Peer          // the Macs found, this one left out
+	seen     map[string]time.Time  // when each was last found, by device
 	remotes  map[string]*remote    // what each peer shares, by its device
 	pulls    map[string]*pull      // downloads, by "device/id"
 	codes    map[string]*string    // pairing codes being typed, by device
@@ -103,7 +104,7 @@ func (a *application) setupSharing() {
 		name = "Mac"
 	}
 	a.share = &sharing{store: st, server: share.NewServer(a.root, st), client: share.NewClient(st, name), name: name,
-		remotes: map[string]*remote{}, pulls: map[string]*pull{}, codes: map[string]*string{}, pairing: map[string]bool{},
+		remotes: map[string]*remote{}, pulls: map[string]*pull{}, codes: map[string]*string{}, seen: map[string]time.Time{}, pairing: map[string]bool{},
 		thumbs: map[string]*ui.Bitmap{}}
 	if a.prefs.Share {
 		a.startSharing()
@@ -170,12 +171,44 @@ func (a *application) findPeers() ([]share.Peer, bool) {
 	return peers, true
 }
 
+// peerGrace is how long a Mac that Bonjour stopped reporting stays in the
+// list: a resolve that fails once, or a lost packet, would make it flicker
+// away and back.
+const peerGrace = 30 * time.Second
+
+// mergePeers is the list to show: the Macs found now, and those found
+// within peerGrace before, as last seen, by name. seen keeps when each was
+// last found, by device.
+func mergePeers(shown, found []share.Peer, seen map[string]time.Time, now time.Time) []share.Peer {
+	byDevice := map[string]share.Peer{}
+	for _, p := range shown {
+		if now.Sub(seen[p.Device]) < peerGrace {
+			byDevice[p.Device] = p
+		}
+	}
+	for _, p := range found {
+		seen[p.Device] = now
+		byDevice[p.Device] = p
+	}
+	for d, at := range seen {
+		if now.Sub(at) >= peerGrace {
+			delete(seen, d)
+		}
+	}
+	peers := make([]share.Peer, 0, len(byDevice))
+	for _, p := range byDevice {
+		peers = append(peers, p)
+	}
+	slices.SortFunc(peers, func(x, y share.Peer) int { return strings.Compare(x.Name, y.Name) })
+	return peers
+}
+
 // setPeers takes the Macs found, listing what the paired ones share the
 // first time they show up.
-func (a *application) setPeers(peers []share.Peer) {
+func (a *application) setPeers(found []share.Peer) {
 	s := a.share
-	s.peers = peers
-	for _, p := range peers {
+	s.peers = mergePeers(s.peers, found, s.seen, time.Now())
+	for _, p := range s.peers {
 		if _, paired := s.store.Paired(p.Device); paired && s.remotes[p.Device] == nil {
 			a.listRemote(p)
 		}
@@ -257,7 +290,7 @@ func (a *application) pair(p share.Peer) {
 				a.status = "配对失败：" + err.Error()
 			} else {
 				*s.code(p.Device) = ""
-				a.status = "已与「" + p.Name + "」配对"
+				a.status = "已与「" + p.Name + "」配对，双方都可以导入对方的视频"
 				delete(s.remotes, p.Device)
 				a.listRemote(p)
 			}
@@ -275,14 +308,27 @@ func (s *sharing) code(device string) *string {
 	return s.codes[device]
 }
 
-// unpair forgets p.
-func (a *application) unpair(p share.Peer) {
+// unpairDevice forgets device both ways, telling it when it is found.
+func (a *application) unpairDevice(device string) {
 	s := a.share
-	if err := s.store.Unpair(p.Device); err != nil {
-		a.status = err.Error()
-		return
+	addr := ""
+	for _, p := range s.peers {
+		if p.Device == device {
+			addr = p.Addr
+		}
 	}
-	delete(s.remotes, p.Device)
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		defer cancel()
+		err := s.client.Unpair(ctx, device, addr)
+		mygo.RunOnMain(func() {
+			delete(s.remotes, device)
+			if err != nil {
+				a.status = "已在本机取消配对；未能通知对方：" + friendly(err)
+			}
+			a.invalidate()
+		})
+	}()
 }
 
 // pulled is the local copy of p's video id, if one was pulled and is

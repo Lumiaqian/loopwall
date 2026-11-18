@@ -128,6 +128,17 @@ func (st *Store) granted(device string) (Granted, bool) {
 	return g, ok
 }
 
+// restoreGrant puts back a grant as it was, its token's hash and all.
+func (st *Store) restoreGrant(device string, g Granted) error {
+	st.mu.Lock()
+	defer st.mu.Unlock()
+	if st.s.Granted == nil {
+		st.s.Granted = map[string]Granted{}
+	}
+	st.s.Granted[device] = g
+	return st.saveLocked()
+}
+
 // Pair records a Mac this one pulls from.
 func (st *Store) Pair(device string, p Paired) error {
 	st.mu.Lock()

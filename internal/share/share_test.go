@@ -6,7 +6,9 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/Lumiaqian/loopwall/internal/catalog"
 )
@@ -185,5 +187,91 @@ func TestStoreKeepsItsState(t *testing.T) {
 	}
 	if info, err := os.Stat(filepath.Join(dir, "share-key.pem")); err != nil || info.Mode().Perm() != 0600 {
 		t.Errorf("the key's mode: %v %v", info, err)
+	}
+}
+
+// TestPairingIsMutual checks that one code pairs two Macs both ways: the
+// Mac that typed it pulls from the other, the other pulls from it without
+// a code of its own; that a failed pairing grants nothing; and that
+// unpairing on either side forgets both ways.
+func TestPairingIsMutual(t *testing.T) {
+	ctx := context.Background()
+	rootA, _ := library(t)
+	rootB, videoB := library(t)
+	serverA, storeA, peerA := serve(t, rootA)
+	_, storeB, peerB := serve(t, rootB)
+	clientA, clientB := NewClient(storeA, "客厅的 Mac"), NewClient(storeB, "书房的 Mac")
+
+	// A wrong code grants nothing in return.
+	if err := clientB.Pair(ctx, peerA, "wrong"); !errors.Is(err, ErrWrongCode) {
+		t.Fatal(err)
+	}
+	if _, ok := storeB.granted(storeA.Device()); ok {
+		t.Fatal("a failed pairing left A granted on B")
+	}
+
+	// B types A's code: B pulls from A, and A from B.
+	if err := clientB.Pair(ctx, peerA, serverA.Code()); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := clientB.Library(ctx, peerA); err != nil {
+		t.Fatalf("B pulls from A: %v", err)
+	}
+	items, err := clientA.Library(ctx, peerB)
+	if err != nil {
+		t.Fatalf("A pulls from B without a code: %v", err)
+	}
+	var got bytes.Buffer
+	if err = clientA.Download(ctx, peerB, items[0].ID, &got, nil); err != nil || !bytes.Equal(got.Bytes(), videoB) {
+		t.Fatalf("A downloads from B: %v", err)
+	}
+
+	// A unpairs: both forget both ways.
+	if err = clientA.Unpair(ctx, storeB.Device(), peerB.Addr); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := storeA.Paired(storeB.Device()); ok {
+		t.Error("A still pulls from B")
+	}
+	if _, ok := storeB.Paired(storeA.Device()); ok {
+		t.Error("B still pulls from A")
+	}
+	if _, err = clientB.Library(ctx, peerA); !errors.Is(err, ErrNotPaired) {
+		t.Errorf("B after A unpaired: %v, want ErrNotPaired", err)
+	}
+	if _, err = clientA.Library(ctx, peerB); !errors.Is(err, ErrNotPaired) {
+		t.Errorf("A after unpairing: %v, want ErrNotPaired", err)
+	}
+	// Unpairing a peer that is gone still forgets it here.
+	serverA.NewCode()
+	if err = clientB.Pair(ctx, peerA, serverA.Code()); err != nil {
+		t.Fatal(err)
+	}
+	if err = clientB.Unpair(ctx, storeA.Device(), ""); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := storeB.Paired(storeA.Device()); ok {
+		t.Error("B still pairs with A after unpairing offline")
+	}
+}
+
+// TestOldPeerPairsOneWay checks that a pairing request without access in
+// return, as versions before 0.1.3 send, still pairs one way.
+func TestOldPeerPairsOneWay(t *testing.T) {
+	root, _ := library(t)
+	s, st, peer := serve(t, root)
+	old := open(t)
+	body := `{"device":"` + old.Device() + `","name":"旧版","code":"` + s.Code() + `"}`
+	hc := httpClient(func(string) error { return nil }, 5*time.Second)
+	resp, err := hc.Post("https://"+peer.Addr+"/v1/pair", "application/json", strings.NewReader(body))
+	if err != nil || resp.StatusCode != 200 {
+		t.Fatalf("pair: %v %v", resp, err)
+	}
+	resp.Body.Close()
+	if _, ok := st.granted(old.Device()); !ok {
+		t.Error("the old device is not granted")
+	}
+	if _, ok := st.Paired(old.Device()); ok {
+		t.Error("paired back with a device that granted nothing")
 	}
 }

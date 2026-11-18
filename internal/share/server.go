@@ -40,6 +40,29 @@ type pairRequest struct {
 	Device string `json:"device"`
 	Name   string `json:"name"`
 	Code   string `json:"code"`
+	// Back is the access the pairing device grants in return, so that one
+	// code pairs both ways. Versions before 0.1.3 send none.
+	Back *backAccess `json:"back,omitempty"`
+}
+
+// backAccess is a token the pairing device accepts from this Mac, and the
+// fingerprint of the certificate its own server presents.
+type backAccess struct {
+	Token       string `json:"token"`
+	Fingerprint string `json:"fingerprint"`
+}
+
+// hex64 reports whether s is 32 bytes in hex, as tokens and fingerprints are.
+func hex64(s string) bool {
+	if len(s) != 64 {
+		return false
+	}
+	for _, c := range s {
+		if !strings.ContainsRune("0123456789abcdef", c) {
+			return false
+		}
+	}
+	return true
 }
 
 type pairResponse struct {
@@ -136,6 +159,7 @@ func (s *Server) Stop() error {
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("POST /v1/pair", s.pair)
+	mux.Handle("POST /v1/unpair", s.authorized(s.unpair))
 	mux.Handle("GET /v1/library", s.authorized(s.library))
 	mux.Handle("GET /v1/thumbnail/{id}", s.authorized(s.media(catalog.ThumbnailPath)))
 	mux.Handle("GET /v1/video/{id}", s.authorized(s.media(catalog.VideoPath)))
@@ -170,8 +194,31 @@ func (s *Server) pair(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
+	// The code proved the device is the user's: what it grants in return,
+	// sent over the same connection, pairs this Mac with it too.
+	if b := req.Back; b != nil && hex64(b.Token) && hex64(b.Fingerprint) {
+		if err := s.store.Pair(req.Device, Paired{Name: name, Token: b.Token, Fingerprint: b.Fingerprint}); err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+	}
 	s.NewCode() // one code, one pairing
 	writeJSON(w, pairResponse{Token: token})
+}
+
+// unpair forgets the device that asks, both ways: it may pull from this
+// Mac no longer, nor this Mac from it.
+func (s *Server) unpair(w http.ResponseWriter, r *http.Request) {
+	device := r.Header.Get("X-Loopwall-Device")
+	err := s.store.Revoke(device)
+	if err == nil {
+		err = s.store.Unpair(device)
+	}
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
 }
 
 // authorized lets through the requests of paired devices only: the
