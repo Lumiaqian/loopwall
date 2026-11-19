@@ -7,13 +7,14 @@ nonisolated struct DisplayGeometry: Equatable {
     let size: CGSize
     let scale: CGFloat
 
-    /// Nil while the display is absent or still configuring (zero bounds).
+    /// Nil while the display has no usable bounds or display mode.
     init?(displayID: UInt32) {
         let bounds = CGDisplayBounds(displayID)
-        let pixelsWide = CGDisplayPixelsWide(displayID)
-        guard bounds.width > 0, bounds.height > 0, pixelsWide > 0 else { return nil }
+        guard bounds.width > 0, bounds.height > 0,
+              let mode = CGDisplayCopyDisplayMode(displayID), mode.width > 0, mode.pixelWidth > 0
+        else { return nil }
         size = bounds.size
-        scale = CGFloat(pixelsWide) / bounds.width
+        scale = CGFloat(mode.pixelWidth) / CGFloat(mode.width)
     }
 }
 
