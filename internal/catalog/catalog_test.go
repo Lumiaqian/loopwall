@@ -216,3 +216,41 @@ func TestValidateRejectsDotFilenames(t *testing.T) {
 		t.Errorf("a plain name with dots rejected: %v", err)
 	}
 }
+
+// The extension writes runtime.json every RuntimeHeartbeat when nothing changed, so
+// a report that old must still authorize cleanup and show as fresh.
+func TestRuntimeHeartbeatIsNeverStale(t *testing.T) {
+	now := time.Now()
+	at := func(age time.Duration) Runtime { return Runtime{UpdatedAtUnix: float64(now.Add(-age).Unix())} }
+	if !at(RuntimeHeartbeat + 2*time.Second).Fresh(now) {
+		t.Fatal("a report one heartbeat plus jitter old is stale")
+	}
+	if at(RuntimeStaleAfter + 2*time.Second).Fresh(now) {
+		t.Fatal("a report older than the stale limit is fresh")
+	}
+}
+
+func TestReapAcceptsHeartbeatAgedRuntime(t *testing.T) {
+	root := t.TempDir()
+	c := fixture(t)
+	removed := c.Media[0]
+	c.RemovedMediaIDs = append(c.RemovedMediaIDs, removed.ID)
+	c.Media, c.Playlist.VideoIDs = c.Media[1:], c.Playlist.VideoIDs[1:]
+	Save(root, &c)
+	dir := filepath.Dir(VideoPath(root, removed))
+	os.MkdirAll(dir, 0700)
+	age := func(d time.Duration) {
+		r := Runtime{SchemaVersion: 1, AppliedRevision: c.Revision, UpdatedAtUnix: float64(time.Now().Add(-d).Unix())}
+		AtomicJSON(filepath.Join(root, "runtime.json"), r)
+	}
+	age(RuntimeStaleAfter + 10*time.Second)
+	Reap(root)
+	if _, e := os.Stat(dir); e != nil {
+		t.Fatal("a stale extension authorized deletion")
+	}
+	age(RuntimeHeartbeat + 8*time.Second)
+	Reap(root)
+	if _, e := os.Stat(dir); !os.IsNotExist(e) {
+		t.Fatal("a heartbeat-aged report did not authorize deletion")
+	}
+}

@@ -63,6 +63,20 @@ type Runtime struct {
 	Errors            []string          `json:"errors"`
 }
 
+const (
+	// RuntimeHeartbeat is how often the extension rewrites runtime.json when nothing
+	// but playback positions changed (PlaylistCadence.runtimeHeartbeat in Swift).
+	RuntimeHeartbeat = 10 * time.Second
+	// RuntimeStaleAfter is how old a report may be and still count as the extension's
+	// current state: three heartbeats, so one late write never reads as silence.
+	RuntimeStaleAfter = 3 * RuntimeHeartbeat
+)
+
+// Fresh reports whether the extension has written runtime.json recently enough to trust.
+func (r Runtime) Fresh(now time.Time) bool {
+	return now.Sub(time.Unix(int64(r.UpdatedAtUnix), 0)) <= RuntimeStaleAfter
+}
+
 func Default() Config {
 	return Config{SchemaVersion: 1, Media: []MediaEntry{}, Playlist: PlaylistSpec{VideoIDs: []string{}, AdvanceMode: "end", IntervalSeconds: 60, KeepAwakeWhenLockedOnAC: true}}
 }
@@ -272,7 +286,7 @@ func Reap(root string) error {
 	}
 
 	r, e := ReadRuntime(root)
-	if e != nil || r.AppliedRevision < c.Revision || time.Since(time.Unix(int64(r.UpdatedAtUnix), 0)) > 15*time.Second {
+	if e != nil || r.AppliedRevision < c.Revision || !r.Fresh(time.Now()) {
 		return nil
 	}
 	for _, id := range c.RemovedMediaIDs {
