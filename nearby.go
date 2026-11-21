@@ -53,9 +53,25 @@ func (a *application) nearbyView(c *ui.Context) {
 	})
 }
 
+// codeFont is the font pairing codes are shown and typed in.
+const codeFont = "SF Mono, Menlo, monospace"
+
+// legacyTypedWarning is what typing six digits is told: the legacy code is
+// no proof of whom it is paired with.
+const legacyTypedWarning = "旧版配对方式，无法防冒充"
+
+// warnRow is a line of warning on its own.
+func warnRow(c *ui.Context, text string) {
+	t := c.Theme()
+	ui.Row(c).Gap(8).AlignItems(ui.Center).Padding(8, 14).FillWidth().TextColor(t.Warning).Children(func() {
+		ui.Icon(c, iconAlert)
+		ui.Text(c, text).FontSize(12).Grow(1)
+	})
+}
+
 func (a *application) peerSection(c *ui.Context, p share.Peer) {
 	s := a.share
-	_, paired := s.store.Paired(p.Device)
+	pairing, paired := s.store.Paired(p.Device)
 	ui.Column(c.Key("peer-" + p.Device)).Gap(10).FillWidth().Children(func() {
 		ui.Row(c).Gap(8).AlignItems(ui.Center).FillWidth().Children(func() {
 			sectionTitle(c, iconMonitor, p.Name)
@@ -66,17 +82,27 @@ func (a *application) peerSection(c *ui.Context, p share.Peer) {
 				glassButton(c, nil, "取消配对", false).OnClick(func() { a.unpairDevice(p.Device) })
 			}
 		})
+		if sameNameDevices(s.peers)[p.Device] {
+			warnRow(c, "附近有同名的 Mac，请核对配对码后再配对")
+		}
+		if paired && !pairing.Verified {
+			warnRow(c, "旧版配对（不安全）：这台 Mac 的身份没有校验过，可能被冒充。建议取消配对，用它显示的新配对码重新配对。")
+		}
 		if !paired {
 			group(c, func() {
-				groupRow(c, "输入配对码", "在「"+p.Name+"」上打开「设置 → 局域网共享」，输入那里显示的 6 位数字；配对一次，两台都能导入对方的视频。", func() {
-					code := s.code(p.Device)
-					ui.TextInput(c, code).Width(120).Radius(999).Label("配对码").Placeholder("000 000").OnSubmit(func() { a.pair(p) })
+				code := s.code(p.Device)
+				groupRow(c, "输入配对码", "在「"+p.Name+"」上打开「设置 → 局域网共享」，输入那里显示的配对码；配对一次，两台都能导入对方的视频。配对码里含有对方的身份，输错或遇到冒充者都会在发送任何内容之前被拦下。", func() {
+					ui.TextInput(c, code).Width(360).Radius(999).Font(codeFont).Label("配对码").Placeholder("XXXX-XXXX-XXXX-XXXX-XXXX-XXXX-XXXX-XXXX").OnSubmit(func() { a.pair(p) })
 					label := "配对"
 					if s.pairing[p.Device] {
 						label = "配对中…"
 					}
 					glassButton(c, iconLink, label, true).Disabled(s.pairing[p.Device] || *code == "").OnClick(func() { a.pair(p) })
 				})
+				if share.IsLegacyCode(*code) {
+					ui.Divider(c)
+					warnRow(c, legacyTypedWarning)
+				}
 			})
 			return
 		}
@@ -201,15 +227,35 @@ func (a *application) shareSettings(c *ui.Context) {
 					}
 				})
 				ui.Divider(c)
-				code := s.server.Code()
-				groupRow(c, "配对码", "在另一台 Mac 的「附近的 Mac」中输入；配对后两台都能导入对方的视频。用过一次或连续输错 5 次后会换新的。", func() {
-					if code == "" {
-						ui.Text(c, "已失效").FontWeight(600).TextColor(t.Warning)
-					} else {
-						ui.Text(c, code[:3]+" "+code[3:]).FontSize(22).Bold().TextColor(t.Accent)
+				code := s.server.PairingCode()
+				groupRow(c, "配对码", "在另一台 Mac 的「附近的 Mac」中输入；配对后两台都能导入对方的视频。里面含有这台 Mac 的身份，所以别人冒充这台 Mac 时对方会拒绝配对。用过一次或连续输错 5 次后会换新的。", func() {
+					if code != "" {
+						glassButton(c, nil, "复制", false).OnClick(a.copyPairingCode)
 					}
 					glassButton(c, nil, "换一个", false).OnClick(s.server.NewCode)
 				})
+				if code == "" {
+					ui.Text(c, "已失效，请换一个").FontWeight(600).TextColor(t.Warning).Padding(0, 14, 12)
+				} else {
+					first, second := codeLines(code)
+					ui.Column(c).Gap(4).Padding(0, 14, 12).Children(func() {
+						ui.Text(c, first).Font(codeFont).FontSize(20).Bold().TextColor(t.Accent).Selectable()
+						ui.Text(c, second).Font(codeFont).FontSize(20).Bold().TextColor(t.Accent).Selectable()
+					})
+				}
+				ui.Divider(c)
+				groupRow(c, "允许旧版 Loopwall 配对（不安全）", "0.1.x 的 Loopwall 只会输入 6 位数字，无法核对对方的身份。只在要和旧版配对时临时打开，配对后关掉。", func() {
+					if glassSwitch(c, &a.prefs.ShareLegacy, "允许旧版 Loopwall 配对", false) {
+						a.setLegacyPairing(a.prefs.ShareLegacy)
+					}
+				})
+				if a.prefs.ShareLegacy {
+					ui.Divider(c)
+					warnRow(c, "6 位数字无法识别冒充者：同一网络里的恶意设备可以冒充这台 Mac，骗走输入的数字并拿到资料库的读取权限。")
+					if legacy := s.server.Code(); legacy != "" {
+						ui.Text(c, "旧版配对码  "+legacy[:3]+" "+legacy[3:]).Font(codeFont).FontSize(16).Bold().TextColor(t.Warning).Padding(0, 14, 12)
+					}
+				}
 			}
 			granted := s.store.Granted()
 			for _, d := range s.grantedDevices() {
@@ -218,6 +264,9 @@ func (a *application) shareSettings(c *ui.Context) {
 				detail := "可以互相导入视频"
 				if _, both := s.store.Paired(d); !both {
 					detail = "可以导入你的视频；对方是旧版本，升级后重新配对即可双向互通"
+				}
+				if g.ClientFingerprint == "" {
+					detail += " · 旧版配对（不安全），建议取消后用新配对码重新配对"
 				}
 				groupRow(c, g.Name, detail+" · "+time.Unix(g.PairedAt, 0).Format("2006-01-02 配对"), func() {
 					glassButton(c, nil, "取消配对", false).OnClick(func() { a.unpairDevice(d) })

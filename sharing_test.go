@@ -20,6 +20,10 @@ func TestFriendly(t *testing.T) {
 		want string
 	}{
 		{share.ErrWrongCode, "配对码不对"},
+		{fmt.Errorf("pair: %w", share.ErrFingerprintMismatch), "可能有人冒充"},
+		{share.ErrLegacyDenied, "允许旧版 Loopwall 配对"},
+		{share.ErrCodeTypo, "配对码有输错的字符"},
+		{share.ErrCodeFormat, "长度或格式不对"},
 		{fmt.Errorf("get: %w", context.DeadlineExceeded), "连接超时"},
 		{fmt.Errorf("dial: %w", syscall.ECONNREFUSED), "已关闭共享"},
 		{fmt.Errorf("下载不完整：%w", io.ErrUnexpectedEOF), "连接中断"},
@@ -122,5 +126,38 @@ func TestPullOutcome(t *testing.T) {
 		if got := friendly(err); !strings.Contains(got, err.Error()) {
 			t.Errorf("friendly(%v) = %q", err, got)
 		}
+	}
+}
+
+// TestSameNameDevices checks that peers sharing a name are all marked, a
+// unique name is not, and names are compared without case or the space
+// around them.
+func TestSameNameDevices(t *testing.T) {
+	peers := []share.Peer{
+		{Name: "书房的 Mac", Device: "a"},
+		{Name: "客厅的 Mac", Device: "b"},
+		{Name: " 书房的 Mac ", Device: "c"},
+		{Name: "Studio", Device: "d"},
+		{Name: "studio", Device: "e"},
+		{Name: "卧室", Device: "f"},
+	}
+	got := sameNameDevices(peers)
+	for d, want := range map[string]bool{"a": true, "b": false, "c": true, "d": true, "e": true, "f": false} {
+		if got[d] != want {
+			t.Errorf("device %s: marked %v, want %v", d, got[d], want)
+		}
+	}
+	if len(sameNameDevices(nil)) != 0 || len(sameNameDevices(peers[:2])) != 0 {
+		t.Error("marked peers with distinct names")
+	}
+}
+
+func TestCodeLines(t *testing.T) {
+	first, second := codeLines("ABCD-EFGH-IJKL-MNOP-QRST-UVWX-2345-6723")
+	if first != "ABCD-EFGH-IJKL-MNOP" || second != "QRST-UVWX-2345-6723" {
+		t.Errorf("codeLines: %q %q", first, second)
+	}
+	if first, second = codeLines("not a code"); first != "not a code" || second != "" {
+		t.Errorf("codeLines of a stranger: %q %q", first, second)
 	}
 }

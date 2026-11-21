@@ -81,7 +81,7 @@ func TestServerLimitsRequests(t *testing.T) {
 		t.Fatal(err)
 	}
 	req.Header.Set("X-Pad", strings.Repeat("a", 32<<10))
-	resp, err := httpClient(func(string) error { return nil }, 5*time.Second).Do(req)
+	resp, err := httpClient(nil, func(string) error { return nil }, nil, 5*time.Second).Do(req)
 	if err != nil {
 		t.Fatal(err)
 	}

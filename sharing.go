@@ -105,6 +105,7 @@ func (a *application) setupSharing() {
 	a.share = &sharing{store: st, server: share.NewServer(a.root, st), client: share.NewClient(st, name), name: name,
 		remotes: map[string]*remote{}, pulls: map[string]*pull{}, codes: map[string]*string{}, seen: map[string]time.Time{}, pairing: map[string]bool{},
 		thumbs: newLRU[string, *ui.Bitmap](thumbCacheSize)}
+	a.share.server.SetLegacy(a.prefs.ShareLegacy)
 	if a.prefs.Share {
 		a.startSharing()
 	}
@@ -147,6 +148,21 @@ func (a *application) setSharing(on bool) {
 		a.startSharing()
 	} else {
 		a.stopSharing()
+	}
+}
+
+// setLegacyPairing allows or refuses pairing by six digits, and remembers it.
+func (a *application) setLegacyPairing(on bool) {
+	a.prefs.ShareLegacy = on
+	a.savePrefs()
+	a.share.server.SetLegacy(on)
+}
+
+// copyPairingCode puts the code this Mac shows on the clipboard.
+func (a *application) copyPairingCode() {
+	if code := a.share.server.PairingCode(); code != "" {
+		mygo.Clipboard.WriteText(code)
+		a.status = "已复制配对码"
 	}
 }
 
@@ -200,6 +216,35 @@ func mergePeers(shown, found []share.Peer, seen map[string]time.Time, now time.T
 	}
 	slices.SortFunc(peers, func(x, y share.Peer) int { return strings.Compare(x.Name, y.Name) })
 	return peers
+}
+
+// sameNameDevices is the devices, of the Macs listed, whose name another of
+// them has: a second Mac that advertises a name may be an impostor, so the
+// user is told to check the code, not the name. Names are compared as
+// typed, but for case and the space around them.
+func sameNameDevices(peers []share.Peer) map[string]bool {
+	key := func(p share.Peer) string { return strings.ToLower(strings.TrimSpace(p.Name)) }
+	count := map[string]int{}
+	for _, p := range peers {
+		count[key(p)]++
+	}
+	same := map[string]bool{}
+	for _, p := range peers {
+		if count[key(p)] > 1 {
+			same[p.Device] = true
+		}
+	}
+	return same
+}
+
+// codeLines is a pairing code, as the sharing Mac shows it, in two lines of
+// four groups each.
+func codeLines(code string) (string, string) {
+	groups := strings.Split(code, "-")
+	if len(groups) != 8 {
+		return code, ""
+	}
+	return strings.Join(groups[:4], "-"), strings.Join(groups[4:], "-")
 }
 
 // setPeers takes the Macs found, listing what the paired ones share the
@@ -304,7 +349,7 @@ func (a *application) fetchThumbnails(p share.Peer, items []share.Item) {
 // pair pairs with p by the code typed for it.
 func (a *application) pair(p share.Peer) {
 	s := a.share
-	code := strings.ReplaceAll(strings.TrimSpace(*s.code(p.Device)), " ", "")
+	code := strings.TrimSpace(*s.code(p.Device))
 	if code == "" || s.pairing[p.Device] {
 		return
 	}
@@ -316,7 +361,7 @@ func (a *application) pair(p share.Peer) {
 		mygo.RunOnMain(func() {
 			s.pairing[p.Device] = false
 			if err != nil {
-				a.status = "配对失败：" + err.Error()
+				a.status = "配对失败：" + friendly(err)
 			} else {
 				*s.code(p.Device) = ""
 				a.status = "已与「" + p.Name + "」配对，双方都可以导入对方的视频"
@@ -449,7 +494,8 @@ func friendly(err error) string {
 	var netErr net.Error
 	switch {
 	case errors.Is(err, share.ErrNotPaired), errors.Is(err, share.ErrWrongCode), errors.Is(err, share.ErrChangedCertificate),
-		errors.Is(err, share.ErrChangedFile), errors.Is(err, share.ErrStalled):
+		errors.Is(err, share.ErrChangedFile), errors.Is(err, share.ErrStalled), errors.Is(err, share.ErrFingerprintMismatch),
+		errors.Is(err, share.ErrLegacyDenied), errors.Is(err, share.ErrCodeTypo), errors.Is(err, share.ErrCodeFormat):
 		return err.Error()
 	case errors.Is(err, context.DeadlineExceeded), errors.As(err, &netErr) && netErr.Timeout():
 		return "连接超时：对方可能已休眠或离开了这个网络"
