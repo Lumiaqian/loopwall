@@ -49,6 +49,10 @@ final class VideoRenderer: @unchecked Sendable {
         let epoch: Int
         let ready: Bool
         let failed: Bool
+
+        var rendererSample: RendererSample {
+            RendererSample(url: url, seconds: seconds, epoch: epoch, ready: ready, failed: failed)
+        }
     }
     func clockSample() -> ClockSample {
         queue.sync {
