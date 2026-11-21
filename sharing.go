@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"io"
 	"net"
-	"os"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -34,13 +33,13 @@ type sharing struct {
 
 	// browsing is read by the ticker, off the main thread.
 	browsing atomic.Bool
-	peers    []share.Peer          // the Macs found, this one left out
-	seen     map[string]time.Time  // when each was last found, by device
-	remotes  map[string]*remote    // what each peer shares, by its device
-	pulls    map[string]*pull      // downloads, by "device/id"
-	codes    map[string]*string    // pairing codes being typed, by device
-	pairing  map[string]bool       // pairings under way, by device
-	thumbs   map[string]*ui.Bitmap // peers' thumbnails, by "device/id"
+	peers    []share.Peer             // the Macs found, this one left out
+	seen     map[string]time.Time     // when each was last found, by device
+	remotes  map[string]*remote       // what each peer shares, by its device
+	pulls    map[string]*pull         // downloads, by "device/id"
+	codes    map[string]*string       // pairing codes being typed, by device
+	pairing  map[string]bool          // pairings under way, by device
+	thumbs   *lru[string, *ui.Bitmap] // peers' thumbnails, by "device/id"
 	// status is how publishing and browsing fare, as the ticker last read it.
 	status platform.SharingStatus
 }
@@ -105,7 +104,7 @@ func (a *application) setupSharing() {
 	}
 	a.share = &sharing{store: st, server: share.NewServer(a.root, st), client: share.NewClient(st, name), name: name,
 		remotes: map[string]*remote{}, pulls: map[string]*pull{}, codes: map[string]*string{}, seen: map[string]time.Time{}, pairing: map[string]bool{},
-		thumbs: map[string]*ui.Bitmap{}}
+		thumbs: newLRU[string, *ui.Bitmap](thumbCacheSize)}
 	if a.prefs.Share {
 		a.startSharing()
 	}
@@ -252,11 +251,40 @@ func (a *application) listRemote(p share.Peer) {
 		items, err := s.client.Library(ctx, p)
 		mygo.RunOnMain(func() {
 			r.items, r.err, r.loading = items, err, false
+			a.fetchThumbnails(p, items)
 			a.invalidate()
 		})
-		for _, it := range items {
-			key := p.Device + "/" + it.ID
+	}()
+}
+
+// thumbnailTimeout bounds each thumbnail's fetch, apart from the list's.
+const thumbnailTimeout = 15 * time.Second
+
+// missingThumbnails is the items of p whose thumbnails are not cached.
+func (s *sharing) missingThumbnails(p share.Peer, items []share.Item) []share.Item {
+	var missing []share.Item
+	for _, it := range items {
+		if !s.thumbs.Has(p.Device + "/" + it.ID) {
+			missing = append(missing, it)
+		}
+	}
+	return missing
+}
+
+// fetchThumbnails fetches the thumbnails of items that are not cached, one
+// after another in the background, each within its own timeout. On the
+// main thread.
+func (a *application) fetchThumbnails(p share.Peer, items []share.Item) {
+	s := a.share
+	missing := s.missingThumbnails(p, items)
+	if len(missing) == 0 {
+		return
+	}
+	go func() {
+		for _, it := range missing {
+			ctx, cancel := context.WithTimeout(context.Background(), thumbnailTimeout)
 			b, err := s.client.Thumbnail(ctx, p, it.ID)
+			cancel()
 			if err != nil {
 				continue
 			}
@@ -264,8 +292,9 @@ func (a *application) listRemote(p share.Peer) {
 			if err != nil {
 				continue
 			}
+			key := p.Device + "/" + it.ID
 			mygo.RunOnMain(func() {
-				s.thumbs[key] = bm
+				s.thumbs.Put(key, bm)
 				a.invalidate()
 			})
 		}
@@ -356,7 +385,7 @@ func (a *application) pullVideo(p share.Peer, it share.Item) {
 		defer cancel()
 		var shown time.Time
 		m, err := catalog.ImportFrom(ctx, a.root, it.Name, it.Ext, func(w io.Writer) error {
-			return s.client.Download(ctx, p, it.ID, w, func(done, total int64) {
+			return s.client.Download(ctx, p, it.ID, it.Size, w, func(done, total int64) {
 				if time.Since(shown) < 150*time.Millisecond && done != total {
 					return
 				}
@@ -368,40 +397,59 @@ func (a *application) pullVideo(p share.Peer, it share.Item) {
 			})
 		}, a.probe)
 		// Read before the deferred cancel: a failure is not a cancellation.
-		cancelled := errors.Is(ctx.Err(), context.Canceled)
+		outcome := pullOutcome(err, ctx.Err())
 		mygo.RunOnMain(func() {
 			defer a.invalidate()
-			switch {
-			case cancelled && err != nil:
+			switch outcome {
+			case pullCancelled:
 				delete(s.pulls, key)
 				return
-			case err != nil:
+			case pullFailed:
 				pl.err = friendly(err)
 				return
 			}
 			delete(s.pulls, key)
-			a.addMedia(m)
-			if !a.save() {
+			if !a.finish(a.addImported([]catalog.MediaEntry{m})) {
 				return
 			}
 			if err := s.store.RecordImport(p.Device, it.ID, m.ID); err != nil {
 				a.status = err.Error()
 				return
 			}
-			if b, err := os.ReadFile(catalog.ThumbnailPath(a.root, m)); err == nil {
-				a.thumbs[m.ID], _ = ui.DecodeBitmap(b)
-			}
 			a.status = "已导入「" + m.Name + "」，并加入轮播"
 		})
 	}()
 }
+
+// pullOutcome is how a pull ended: err is the import's, ctxErr the pull's
+// context's, read before it is cancelled for good. A failure that is not
+// the user's cancelling stays listed, with its reason; a cancel leaves
+// nothing; a pull that finished before the cancel arrived is done.
+func pullOutcome(err, ctxErr error) pullState {
+	switch {
+	case err == nil:
+		return pullDone
+	case errors.Is(ctxErr, context.Canceled):
+		return pullCancelled
+	}
+	return pullFailed
+}
+
+type pullState int
+
+const (
+	pullDone pullState = iota
+	pullCancelled
+	pullFailed
+)
 
 // friendly words an error of sharing for the user: the network's own,
 // as a refused or timed out connection, say what likely happened.
 func friendly(err error) string {
 	var netErr net.Error
 	switch {
-	case errors.Is(err, share.ErrNotPaired), errors.Is(err, share.ErrWrongCode), errors.Is(err, share.ErrChangedCertificate):
+	case errors.Is(err, share.ErrNotPaired), errors.Is(err, share.ErrWrongCode), errors.Is(err, share.ErrChangedCertificate),
+		errors.Is(err, share.ErrChangedFile), errors.Is(err, share.ErrStalled):
 		return err.Error()
 	case errors.Is(err, context.DeadlineExceeded), errors.As(err, &netErr) && netErr.Timeout():
 		return "连接超时：对方可能已休眠或离开了这个网络"

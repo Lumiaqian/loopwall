@@ -62,7 +62,12 @@ func migrateUserData() error {
 	if err != nil {
 		return err
 	}
-	dir := filepath.Dir(path)
+	return migrateUserDataTo(filepath.Dir(path))
+}
+
+// migrateUserDataTo is migrateUserData into dir, the app's user data
+// directory, from its sibling the legacy one.
+func migrateUserDataTo(dir string) error {
 	return moveFiles(filepath.Join(filepath.Dir(dir), legacyUserData), dir, userDataFiles...)
 }
 

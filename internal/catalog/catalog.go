@@ -182,11 +182,31 @@ func Save(root string, c *Config) error {
 	}
 	next := *c
 	next.Revision++
+	next.RemovedMediaIDs = pruneRemoved(root, next.RemovedMediaIDs)
 	if e := AtomicJSON(filepath.Join(root, "catalog.json"), next); e != nil {
 		return e
 	}
 	*c = next
 	return nil
+}
+
+// pruneRemoved keeps the deleted IDs whose videos/<id> still exists: once
+// Reap has removed the directory, the ID has nothing left to clean up, and
+// the list would otherwise only grow.
+func pruneRemoved(root string, ids []string) []string {
+	if len(ids) == 0 {
+		return ids
+	}
+	kept := make([]string, 0, len(ids))
+	for _, id := range ids {
+		if !safeID(id) {
+			continue
+		}
+		if _, err := os.Stat(filepath.Join(root, "videos", id)); err == nil || !errors.Is(err, os.ErrNotExist) {
+			kept = append(kept, id)
+		}
+	}
+	return kept
 }
 func ReadRuntime(root string) (Runtime, error) {
 	var r Runtime

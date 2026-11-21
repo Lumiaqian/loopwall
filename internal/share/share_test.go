@@ -97,14 +97,14 @@ func TestPairListDownload(t *testing.T) {
 	}
 	var got bytes.Buffer
 	var last int64
-	if err = client.Download(ctx, peer, videoID, &got, func(done, total int64) { last = done }); err != nil {
+	if err = client.Download(ctx, peer, videoID, int64(len(video)), &got, func(done, total int64) { last = done }); err != nil {
 		t.Fatal(err)
 	}
 	if !bytes.Equal(got.Bytes(), video) || last != int64(len(video)) {
 		t.Fatalf("downloaded %d bytes, reported %d, of %d", got.Len(), last, len(video))
 	}
 	// Only the library's videos, by ID: no path of the request's.
-	if err = client.Download(ctx, peer, "..%2Fcatalog.json", &got, nil); err == nil {
+	if err = client.Download(ctx, peer, "..%2Fcatalog.json", 0, &got, nil); err == nil {
 		t.Error("served what is not a video of the library")
 	}
 
@@ -222,7 +222,7 @@ func TestPairingIsMutual(t *testing.T) {
 		t.Fatalf("A pulls from B without a code: %v", err)
 	}
 	var got bytes.Buffer
-	if err = clientA.Download(ctx, peerB, items[0].ID, &got, nil); err != nil || !bytes.Equal(got.Bytes(), videoB) {
+	if err = clientA.Download(ctx, peerB, items[0].ID, items[0].Size, &got, nil); err != nil || !bytes.Equal(got.Bytes(), videoB) {
 		t.Fatalf("A downloads from B: %v", err)
 	}
 

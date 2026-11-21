@@ -38,7 +38,7 @@ type application struct {
 	status        string
 	busy          bool
 	login         bool
-	thumbs        map[string]*ui.Bitmap
+	thumbs        *lru[string, *ui.Bitmap] // decoded library thumbnails, by media ID; see thumb
 	runtime       catalog.Runtime
 	displays      []platform.DisplayInfo
 	preview       *ui.VideoPlayer
@@ -57,16 +57,16 @@ func main() {
 	mygo.Use(updatenative.Plugin)
 	updatesUsed = true
 	if !mygo.App.RequestSingleInstanceLock() {
-		return
+		return // the running instance has the arguments: see secondInstance
 	}
-	app := &application{root: catalog.Root(), section: sectionLibrary, thumbs: map[string]*ui.Bitmap{}}
+	app := &application{root: catalog.Root(), section: sectionLibrary}
 	mygo.App.OnWindowAllClosed(func() {})
 	mygo.App.OnActivate(func(visible bool) {
-		if !visible && !(len(os.Args) > 2 && os.Args[1] == "--import") {
+		if _, importing := importArgs(os.Args[1:], ""); !visible && !importing {
 			app.open()
 		}
 	})
-	mygo.App.OnSecondInstance(func(_ []string, _ string) { app.open() })
+	mygo.App.OnSecondInstance(app.secondInstance)
 	mygo.App.OnOpenURL(func(_ string) { app.open() })
 	mygo.App.SetMenu(mygo.NewMenu([]*mygo.MenuItem{{Role: mygo.RoleAppMenu}, {Role: mygo.RoleEditMenu}, {Role: mygo.RoleWindowMenu}}))
 	mygo.App.WhenReady(func() {
@@ -97,23 +97,13 @@ func main() {
 		app.prefs = loadPrefs()
 		mygo.Theme.SetSource(app.prefs.themeSource())
 		app.login = mygo.App.OpenAtLogin()
-		if len(os.Args) > 2 && os.Args[1] == "--import" {
-			go func() {
-				videos, _ := videoFiles(os.Args[2:], app.root)
-				added, errs := app.importFiles(videos)
-				app.addMedia(added...)
-				imported := len(added)
-				if err := catalog.Save(app.root, &app.config); err != nil {
-					errs = append(errs, err.Error())
-				} else if err := app.host.NotifyLibraryChanged(); err != nil {
-					errs = append(errs, err.Error())
-				}
-				_ = catalog.AtomicJSON(filepath.Join(app.root, "import-result.json"), map[string]any{"imported": imported, "errors": errs})
+		if paths, importing := importArgs(os.Args[1:], ""); importing {
+			app.importPaths(paths, func(imported int, errs []string) {
+				app.writeImportResult(imported, errs)
 				mygo.App.Quit()
-			}()
+			})
 			return
 		}
-		app.loadThumbnails()
 		app.reapLater()
 		if len(migrated) > 0 {
 			app.status = strings.Join(migrated, "；")
@@ -160,10 +150,10 @@ func main() {
 						app.share.status = sharingStatus
 					}
 					app.runtime = r
-					app.observeWallpaper(r, stuck, time.Now())
 					if err == nil {
 						app.displays = displays
 					}
+					app.observeWallpaper(r, stuck, time.Now())
 					if app.window != nil {
 						app.window.Invalidate()
 					}
@@ -194,8 +184,41 @@ func (a *application) open() {
 func openWallpaperSettings() {
 	_ = mygo.Shell.OpenExternal("x-apple.systempreferences:com.apple.Wallpaper-Settings.extension")
 }
-func (a *application) save() bool {
-	if err := catalog.Save(a.root, &a.config); err != nil {
+
+// saveCatalog writes the library's configuration; tests replace it.
+var saveCatalog = catalog.Save
+
+// cloneConfig copies c deeply enough that editing the copy leaves c alone.
+func cloneConfig(c catalog.Config) catalog.Config {
+	c.RemovedMediaIDs = slices.Clone(c.RemovedMediaIDs)
+	c.Media = slices.Clone(c.Media)
+	c.Playlist.VideoIDs = slices.Clone(c.Playlist.VideoIDs)
+	c.Playlist.Pins = maps.Clone(c.Playlist.Pins)
+	return c
+}
+
+// update applies edit to a copy of the configuration, saves the copy and
+// only then makes it the app's: a save that fails leaves memory as the disk
+// still is.
+func (a *application) update(edit func(*catalog.Config)) error {
+	next := cloneConfig(a.config)
+	edit(&next)
+	if err := saveCatalog(a.root, &next); err != nil {
+		return err
+	}
+	a.config = next
+	return nil
+}
+
+// commit is update, then telling the extension, and saying how it went.
+func (a *application) commit(edit func(*catalog.Config)) bool {
+	return a.finish(a.update(edit))
+}
+
+// finish says how a save, whose result is err, went, and tells the
+// extension of a saved one.
+func (a *application) finish(err error) bool {
+	if err != nil {
 		a.status = "保存失败：" + err.Error()
 		return false
 	}
@@ -206,14 +229,28 @@ func (a *application) save() bool {
 	a.status = "已保存，壁纸会自动更新"
 	return true
 }
-func (a *application) loadThumbnails() {
-	for _, m := range a.config.Media {
-		if a.thumbs[m.ID] == nil {
-			if b, e := os.ReadFile(catalog.ThumbnailPath(a.root, m)); e == nil {
-				a.thumbs[m.ID], _ = ui.DecodeBitmap(b)
-			}
-		}
+
+// thumbCacheSize bounds the decoded thumbnails kept in memory, a library's
+// and the peers' each.
+const thumbCacheSize = 256
+
+// thumb is the thumbnail of library video id, nil when it has none: read
+// and decoded on first use, and kept while it is among the most recently
+// used. A miss is kept too, so a frame does not read the disk again. On the
+// main thread.
+func (a *application) thumb(id string) *ui.Bitmap {
+	if a.thumbs == nil {
+		a.thumbs = newLRU[string, *ui.Bitmap](thumbCacheSize)
 	}
+	if bm, ok := a.thumbs.Get(id); ok {
+		return bm
+	}
+	var bm *ui.Bitmap
+	if b, e := os.ReadFile(catalog.ThumbnailPath(a.root, catalog.MediaEntry{ID: id})); e == nil {
+		bm, _ = ui.DecodeBitmap(b)
+	}
+	a.thumbs.Put(id, bm)
+	return bm
 }
 
 // probe reads a video's size, rate and length and writes its thumbnail,
@@ -240,13 +277,25 @@ func (a *application) importFiles(paths []string) ([]catalog.MediaEntry, []strin
 	return added, errs
 }
 
-// addMedia adds imported videos to the library and the end of the
-// playlist, unsaved.
-func (a *application) addMedia(entries ...catalog.MediaEntry) {
+// addMedia adds imported videos to c's library and the end of its
+// playlist.
+func addMedia(c *catalog.Config, entries ...catalog.MediaEntry) {
 	for _, m := range entries {
-		a.config.Media = append(a.config.Media, m)
-		a.config.Playlist.VideoIDs = append(a.config.Playlist.VideoIDs, m.ID)
+		c.Media = append(c.Media, m)
+		c.Playlist.VideoIDs = append(c.Playlist.VideoIDs, m.ID)
 	}
+}
+
+// addImported saves the library with entries added. When that fails, the
+// copies already published in videos/ are removed, so nothing is orphaned.
+func (a *application) addImported(entries []catalog.MediaEntry) error {
+	err := a.update(func(c *catalog.Config) { addMedia(c, entries...) })
+	if err != nil {
+		for _, m := range entries {
+			_ = os.RemoveAll(filepath.Join(a.root, "videos", m.ID))
+		}
+	}
+	return err
 }
 func (a *application) chooseImport() {
 	if a.busy {
@@ -265,7 +314,7 @@ func (a *application) chooseImport() {
 			case len(paths) == 0:
 				a.status = "已取消导入"
 			default:
-				a.importPaths(paths)
+				a.importPaths(paths, nil)
 			}
 			a.invalidate()
 		})
@@ -273,15 +322,24 @@ func (a *application) chooseImport() {
 }
 
 // importPaths imports the videos among paths, chosen or dropped, and in
-// the folders among them, in the background. On the main thread.
-func (a *application) importPaths(paths []string) {
+// the folders among them, in the background. done, if not nil, is told how
+// many were imported and what went wrong, once, on the main thread. On the
+// main thread.
+func (a *application) importPaths(paths []string, done func(imported int, errs []string)) {
+	finish := func(imported int, errs []string) {
+		if done != nil {
+			done(imported, errs)
+		}
+	}
 	if a.busy {
 		a.status = "正在处理上一批，请稍后再导入"
+		finish(0, []string{a.status})
 		return
 	}
 	videos, skipped := videoFiles(paths, a.root)
 	if len(videos) == 0 {
 		a.status = "没有可导入的视频（支持 MP4、MOV、M4V）"
+		finish(0, []string{a.status})
 		return
 	}
 	a.busy = true
@@ -292,10 +350,17 @@ func (a *application) importPaths(paths []string) {
 		// what changed it meanwhile, as a download, stays.
 		added, errs := a.importFiles(videos)
 		mygo.RunOnMain(func() {
-			a.addMedia(added...)
+			err := a.addImported(added)
+			saved := a.finish(err)
 			a.busy = false
-			saved := a.save()
-			a.loadThumbnails()
+			imported := len(added)
+			switch {
+			case err != nil:
+				imported = 0
+				errs = append(errs, err.Error())
+			case !saved: // saved, but the extension was not told
+				errs = append(errs, a.status)
+			}
 			if saved {
 				a.status = fmt.Sprintf("已导入 %d 个视频", len(added))
 				if skipped > 0 {
@@ -306,8 +371,54 @@ func (a *application) importPaths(paths []string) {
 				}
 			}
 			a.invalidate()
+			finish(imported, errs)
 		})
 	}()
+}
+
+// importArgs reads the paths of "--import <paths…>" from args, a command
+// line without the program's name, as the first instance is handed a
+// second's. Relative paths are resolved against workingDir, when it is
+// not empty. It reports false for any other command line.
+func importArgs(args []string, workingDir string) ([]string, bool) {
+	if len(args) < 2 || args[0] != "--import" {
+		return nil, false
+	}
+	paths := make([]string, 0, len(args)-1)
+	for _, p := range args[1:] {
+		if workingDir != "" && !filepath.IsAbs(p) {
+			p = filepath.Join(workingDir, p)
+		}
+		paths = append(paths, p)
+	}
+	return paths, true
+}
+
+// writeImportResult tells whoever ran --import how it went.
+func (a *application) writeImportResult(imported int, errs []string) {
+	if errs == nil {
+		errs = []string{}
+	}
+	if err := catalog.AtomicJSON(filepath.Join(a.root, "import-result.json"), map[string]any{"imported": imported, "errors": errs}); err != nil {
+		log.Println(err)
+	}
+}
+
+// secondInstance is what the running app does when another is started,
+// which handed over its command line: "--import" imports the paths, as the
+// command line does when the app is not running; anything else opens the
+// window. On the main thread.
+func (a *application) secondInstance(args []string, workingDir string) {
+	paths, importing := importArgs(args, workingDir)
+	if !importing {
+		a.open()
+		return
+	}
+	if a.host == nil {
+		a.writeImportResult(0, []string{"管理端尚未就绪，请稍后重试"})
+		return
+	}
+	a.importPaths(paths, a.writeImportResult)
 }
 
 // videoFiles expands paths into the videos to import: those of a video's
@@ -381,12 +492,15 @@ func (a *application) deleteMedia(m catalog.MediaEntry) {
 		mygo.RunOnMain(func() {
 			a.busy = false
 			if err == nil && r.Button == 1 {
-				a.config.Playlist.VideoIDs = slices.DeleteFunc(a.config.Playlist.VideoIDs, func(id string) bool { return id == m.ID })
-				maps.DeleteFunc(a.config.Playlist.Pins, func(_, id string) bool { return id == m.ID })
-				a.config.Media = slices.DeleteFunc(a.config.Media, func(e catalog.MediaEntry) bool { return e.ID == m.ID })
-				a.config.RemovedMediaIDs = append(a.config.RemovedMediaIDs, m.ID)
-				delete(a.thumbs, m.ID)
-				saved := a.save()
+				saved := a.commit(func(c *catalog.Config) {
+					c.Playlist.VideoIDs = slices.DeleteFunc(c.Playlist.VideoIDs, func(id string) bool { return id == m.ID })
+					maps.DeleteFunc(c.Playlist.Pins, func(_, id string) bool { return id == m.ID })
+					c.Media = slices.DeleteFunc(c.Media, func(e catalog.MediaEntry) bool { return e.ID == m.ID })
+					c.RemovedMediaIDs = append(c.RemovedMediaIDs, m.ID)
+				})
+				if _, ok := a.entry(m.ID); !ok && a.thumbs != nil {
+					a.thumbs.Remove(m.ID)
+				}
 				if a.previewWindow != nil {
 					a.previewWindow.Close()
 				}

@@ -27,7 +27,7 @@ func (a *application) previewMedia(m catalog.MediaEntry) {
 	}
 	p.SetLoop(true).SetMuted(true)
 	a.preview = p
-	thumb := a.thumbs[m.ID]
+	thumb := a.thumb(m.ID)
 	// The player takes its first picture only as the window draws, and
 	// nothing has the window draw again once the system decoded it: the
 	// picture would wait for the pointer to move over the window. So the

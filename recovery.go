@@ -5,11 +5,13 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
 
 	"github.com/Lumiaqian/loopwall/internal/catalog"
+	"github.com/Lumiaqian/loopwall/internal/platform"
 )
 
 // WallpaperAgent sometimes stops serving the extension: after the extension
@@ -73,13 +75,26 @@ func (a *application) observeWallpaper(r catalog.Runtime, stuckSignals int64, no
 		}
 	}
 	silent := r.UpdatedAtUnix > 0 && now.Sub(time.Unix(int64(r.UpdatedAtUnix), 0)) > silentAfter
-	waiting := len(r.Displays) > 0 && len(r.ActiveDisplayKeys) == 0
+	waiting := a.waitingDisplays(r) && len(r.ActiveDisplayKeys) == 0
 	switch {
 	case !silent && !waiting:
 		a.stallSince = time.Time{}
 	case a.stallSince.IsZero():
 		a.stallSince = now
 	}
+}
+
+// waitingDisplays reports whether the runtime lists a display that is
+// connected now: runtime.json keeps every display that ever appeared, so
+// the ones long gone must not count. While the connected displays are
+// unknown, every listed one counts.
+func (a *application) waitingDisplays(r catalog.Runtime) bool {
+	if len(a.displays) == 0 {
+		return len(r.Displays) > 0
+	}
+	return slices.ContainsFunc(r.Displays, func(d catalog.DisplayProgress) bool {
+		return slices.ContainsFunc(a.displays, func(c platform.DisplayInfo) bool { return c.Identifier == d.DisplayKey })
+	})
 }
 
 // wallpaperStalled reports that the wallpaper has waited or been silent long
