@@ -7,7 +7,30 @@ struct RendererSample: Sendable, Equatable {
     var seconds: Double
     var epoch: Int
     var ready: Bool
-    var failed: Bool
+    /// The video the renderer gave up on. It stays set until a frame is shown again,
+    /// so it can outlive the moment it mattered: only the current video's URL counts.
+    var failedURL: URL?
+    /// Distinguishes one failure from the next, so a stale `failedURL` is not re-handled.
+    var failureSerial: Int
+}
+
+/// Tells the renderer when to stop recovering from a decoder error on its own.
+/// A `.failed` renderer is first rebuilt in place; only `limit` failures in a row on
+/// the same asset, with no presented frame or finished loop between them, are final.
+struct RenderFailureCounter {
+    static let limit = 3
+    private var url: URL?
+    private var count = 0
+
+    /// Returns true once recovery should stop and the failure be reported.
+    mutating func failed(_ url: URL) -> Bool {
+        count = self.url == url ? count + 1 : 1
+        self.url = url
+        return count >= Self.limit
+    }
+    mutating func presented() {
+        url = nil; count = 0
+    }
 }
 
 /// The pure decisions behind `PlaylistController.tick`. Side effects (registry,
@@ -23,6 +46,10 @@ nonisolated enum PlaylistTick {
     struct LeaderState {
         var clock: PresentationClock?
         var leaderID: Int?
+        /// The last failure acted on (rejected, or retried after a reload).
+        var handledFailure: Int?
+        /// Set by a reload: a failure already acted on is retried once instead of re-rejected.
+        var retryRequested = false
     }
 
     struct Play: Equatable, Sendable {
@@ -36,6 +63,8 @@ nonisolated enum PlaylistTick {
         var rejectID: String?
         /// The leader drifted from the timeline: seek it back.
         var resync: Play?
+        /// A reload cleared the rejection of a video the renderer failed on: play it again.
+        var retry: Play?
         var crossedBoundary = false
     }
 
@@ -56,12 +85,22 @@ nonisolated enum PlaylistTick {
             return outcome
         }
         let sample = leader.sample
-        if sample.failed {
-            outcome.rejectID = progress.videoID
+        let url = urlFor(progress.videoID)
+        // Only a failure of the current video counts; a failure of another URL is stale here.
+        if let failed = sample.failedURL, failed == url {
             state.clock = nil
+            if state.retryRequested {
+                state.retryRequested = false
+                state.handledFailure = sample.failureSerial
+                outcome.retry = Play(url: failed, position: progress.positionSeconds, force: true)
+            } else if state.handledFailure != sample.failureSerial {
+                state.handledFailure = sample.failureSerial
+                outcome.rejectID = progress.videoID
+            }
             return outcome
         }
-        guard sample.ready, let url = urlFor(progress.videoID), sample.url == url else {
+        state.retryRequested = false
+        guard sample.ready, let url, sample.url == url else {
             state.clock = nil
             return outcome
         }
