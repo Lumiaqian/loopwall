@@ -60,3 +60,78 @@ func TestMoveFiles(t *testing.T) {
 		t.Error("moved a file not the app's")
 	}
 }
+
+// TestMigrateUserDataPartially checks a migration that finds some files
+// already at the destination: those stay, the rest move, nothing is
+// lost, and it is safe to run again.
+func TestMigrateUserDataPartially(t *testing.T) {
+	support := t.TempDir()
+	legacy, dir := filepath.Join(support, legacyUserData), filepath.Join(support, "Loopwall")
+	write := func(d, name, body string) {
+		t.Helper()
+		if err := os.MkdirAll(d, 0o700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(d, name), []byte(body), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	read := func(d, name string) string {
+		b, err := os.ReadFile(filepath.Join(d, name))
+		if err != nil {
+			return "<missing>"
+		}
+		return string(b)
+	}
+	write(legacy, "settings.json", "old settings")
+	write(legacy, "share.json", "old share")
+	write(legacy, "share-cert.pem", "old cert") // no key beside it
+	write(dir, "share.json", "new share")
+	write(dir, "settings.json", "new settings")
+
+	for run := 0; run < 2; run++ {
+		if err := migrateUserDataTo(dir); err != nil {
+			t.Fatal(err)
+		}
+		for name, want := range map[string]string{"settings.json": "new settings", "share.json": "new share", "share-cert.pem": "old cert", "share-key.pem": "<missing>"} {
+			if got := read(dir, name); got != want {
+				t.Errorf("run %d: %s = %q, want %q", run, name, got, want)
+			}
+		}
+	}
+	// What was at the destination already is left, with its legacy twin.
+	if got := read(legacy, "share.json"); got != "old share" {
+		t.Errorf("legacy twin = %q", got)
+	}
+	if got := read(legacy, "share-cert.pem"); got != "<missing>" {
+		t.Errorf("a moved file is still in the legacy directory: %q", got)
+	}
+}
+
+func TestMigrateUserDataWithoutLegacy(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "Loopwall")
+	if err := migrateUserDataTo(dir); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(dir); err == nil {
+		t.Error("created a directory with nothing to move")
+	}
+}
+
+func TestMoveFilesReportsFailure(t *testing.T) {
+	from, base := t.TempDir(), t.TempDir()
+	if err := os.WriteFile(filepath.Join(from, "settings.json"), []byte("x"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	blocked := filepath.Join(base, "file")
+	if err := os.WriteFile(blocked, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	// The destination cannot be made: the file stays where it is.
+	if err := moveFiles(from, filepath.Join(blocked, "Loopwall"), "settings.json"); err == nil {
+		t.Fatal("no error for a destination that cannot be made")
+	}
+	if _, err := os.Stat(filepath.Join(from, "settings.json")); err != nil {
+		t.Errorf("the source was lost: %v", err)
+	}
+}
