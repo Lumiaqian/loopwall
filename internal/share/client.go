@@ -24,6 +24,9 @@ var (
 	// ErrChangedCertificate is a peer presenting another certificate than
 	// it paired with: another Mac in its place, or its sharing reset.
 	ErrChangedCertificate = errors.New("对方的身份变了，请重新配对")
+	// ErrFingerprintMismatch is a peer whose certificate is not the one the
+	// pairing code names: nothing was sent to it.
+	ErrFingerprintMismatch = errors.New("对方 Mac 的身份与配对码不符，可能有人冒充，已中止配对")
 	// ErrChangedFile is a video that is not the size its library listed:
 	// the peer changed it since.
 	ErrChangedFile = errors.New("对方的文件已变化，请刷新后重试")
@@ -48,25 +51,42 @@ type Client struct {
 // NewClient makes a client pairing as name.
 func NewClient(store *Store, name string) *Client { return &Client{store: store, name: name} }
 
-// Pair pairs with peer by the code it shows, pinning the certificate it
-// presents, and grants it access in return, so that it pulls from this
-// Mac too without a code of this one: a peer before 0.1.3 ignores that.
-func (c *Client) Pair(ctx context.Context, peer Peer, code string) (err error) {
+// Pair pairs with peer by the code it shows, and grants it access in
+// return, so that it pulls from this Mac too without a code of this one: a
+// peer before 0.1.3 ignores that.
+//
+// A long code names the certificate of the Mac that shows it: the
+// handshake fails, before anything is sent, with ErrFingerprintMismatch
+// unless the peer presents that. This Mac presents its own certificate
+// too, so the peer can bind what it grants to it. Six digits are the
+// legacy code, of versions before 0.2: they pin whatever certificate
+// answers, and cannot tell an impersonator.
+func (c *Client) Pair(ctx context.Context, peer Peer, code string) error {
+	if IsLegacyCode(code) {
+		return c.pair(ctx, peer, LegacySecret(code), nil)
+	}
+	pc, err := ParsePairCode(code) // a mistyped code goes nowhere
+	if err != nil {
+		return err
+	}
+	return c.pair(ctx, peer, pc.Secret, &pc)
+}
+
+// pair pairs with peer by secret. want, the long code, is nil for the
+// legacy flow.
+func (c *Client) pair(ctx context.Context, peer Peer, secret string, want *PairCode) (err error) {
 	cert, err := c.store.Certificate()
 	if err != nil {
 		return err
 	}
-	// Granted before asking, so that the peer may list this Mac at once;
-	// taken back, as it was, if the pairing fails.
 	back := randomHex(32)
 	prev, had := c.store.granted(peer.Device)
-	if err := c.store.Grant(peer.Device, peer.Name, back); err != nil {
-		return err
-	}
+	granted := false
 	defer func() {
-		if err == nil {
+		if err == nil || !granted {
 			return
 		}
+		// Taken back, as it was, as the pairing failed.
 		if had {
 			_ = c.store.restoreGrant(peer.Device, prev)
 		} else {
@@ -74,15 +94,41 @@ func (c *Client) Pair(ctx context.Context, peer Peer, code string) (err error) {
 		}
 	}()
 	var seen string
-	hc := httpClient(func(fp string) error { seen = fp; return nil }, 15*time.Second)
-	body, _ := json.Marshal(pairRequest{Device: c.store.Device(), Name: c.name, Code: code,
-		Back: &backAccess{Token: back, Fingerprint: Fingerprint(cert.Certificate[0])}})
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, "https://"+peer.Addr+"/v1/pair", bytes.NewReader(body))
+	check := func(fp string) error {
+		if want != nil && !want.Matches(fp) {
+			return ErrFingerprintMismatch
+		}
+		return nil
+	}
+	// Granted once the peer is who the code says, and before it is asked,
+	// so that it may list this Mac at once; with a long code, to that
+	// certificate alone.
+	authenticated := func(fp string) error {
+		seen = fp
+		bound := ""
+		if want != nil {
+			bound = fp
+		}
+		granted = true
+		return c.store.Grant(peer.Device, peer.Name, back, bound)
+	}
+	req := pairRequest{Device: c.store.Device(), Name: c.name, Code: secret,
+		Back: &backAccess{Token: back, Fingerprint: Fingerprint(cert.Certificate[0])}}
+	var clientCert *tls.Certificate
+	if want != nil {
+		req.Version, clientCert = pairVersion, &cert
+	}
+	hc := httpClient(clientCert, check, authenticated, 15*time.Second)
+	body, _ := json.Marshal(req)
+	hreq, err := http.NewRequestWithContext(ctx, http.MethodPost, "https://"+peer.Addr+"/v1/pair", bytes.NewReader(body))
 	if err != nil {
 		return err
 	}
-	resp, err := hc.Do(req)
+	resp, err := hc.Do(hreq)
 	if err != nil {
+		if errors.Is(err, ErrFingerprintMismatch) {
+			return ErrFingerprintMismatch
+		}
 		return err
 	}
 	defer resp.Body.Close()
@@ -220,12 +266,18 @@ func (c *Client) request(ctx context.Context, method string, peer Peer, path str
 	if !ok {
 		return nil, ErrNotPaired
 	}
-	hc := httpClient(func(fp string) error {
+	cert, err := c.store.Certificate()
+	if err != nil {
+		return nil, err
+	}
+	// The certificate is presented too: a pairing of version 2 binds the
+	// token to it.
+	hc := httpClient(&cert, func(fp string) error {
 		if fp != p.Fingerprint {
 			return ErrChangedCertificate
 		}
 		return nil
-	}, timeout)
+	}, nil, timeout)
 	req, err := http.NewRequestWithContext(ctx, method, "https://"+peer.Addr+path, nil)
 	if err != nil {
 		return nil, err
@@ -252,24 +304,44 @@ func (c *Client) request(ctx context.Context, method string, peer Peer, path str
 }
 
 // httpClient trusts the certificate that check accepts by its
-// fingerprint, as the peer's is self-signed.
-func httpClient(check func(fingerprint string) error, timeout time.Duration) *http.Client {
+// fingerprint, as the peer's is self-signed, and presents cert, if any, as
+// its own. after, if any, is called once the handshake is complete, the
+// peer proven to hold the certificate's key, before a request is sent: a
+// check in VerifyConnection runs before that proof, so it only turns away.
+func httpClient(cert *tls.Certificate, check, after func(fingerprint string) error, timeout time.Duration) *http.Client {
+	cfg := &tls.Config{
+		MinVersion: tls.VersionTLS13,
+		// The chain is not verified: the fingerprint is.
+		InsecureSkipVerify: true,
+		VerifyConnection: func(cs tls.ConnectionState) error {
+			if len(cs.PeerCertificates) == 0 {
+				return errors.New("对方没有出示证书")
+			}
+			return check(Fingerprint(cs.PeerCertificates[0].Raw))
+		},
+	}
+	if cert != nil {
+		cfg.Certificates = []tls.Certificate{*cert}
+	}
+	dialer := &tls.Dialer{NetDialer: &net.Dialer{Timeout: 5 * time.Second}, Config: cfg}
 	return &http.Client{
 		Timeout: timeout,
 		Transport: &http.Transport{
-			DisableKeepAlives:   true, // a client per request
-			DialContext:         (&net.Dialer{Timeout: 5 * time.Second}).DialContext,
-			TLSHandshakeTimeout: 10 * time.Second,
-			TLSClientConfig: &tls.Config{
-				MinVersion: tls.VersionTLS13,
-				// The chain is not verified: the fingerprint is.
-				InsecureSkipVerify: true,
-				VerifyConnection: func(cs tls.ConnectionState) error {
-					if len(cs.PeerCertificates) == 0 {
-						return errors.New("对方没有出示证书")
+			DisableKeepAlives: true, // a client per request
+			DialTLSContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
+				ctx, cancel := context.WithTimeout(ctx, 15*time.Second) // dial and handshake
+				defer cancel()
+				conn, err := dialer.DialContext(ctx, network, addr)
+				if err != nil {
+					return nil, err
+				}
+				if after != nil {
+					if err = after(Fingerprint(conn.(*tls.Conn).ConnectionState().PeerCertificates[0].Raw)); err != nil {
+						_ = conn.Close()
+						return nil, err
 					}
-					return check(Fingerprint(cs.PeerCertificates[0].Raw))
-				},
+				}
+				return conn, nil
 			},
 		},
 	}
