@@ -116,3 +116,117 @@ require(SnapshotSizing.maximumSize(videoSize: CGSize(width: 3_840, height: 2_160
 require(SnapshotSizing.maximumSize(videoSize: .zero, displayPixels: hd) == nil, "an empty video size is unknown")
 require(SnapshotSizing.maximumSize(videoSize: hd, displayPixels: .zero) == nil, "an empty display size is unknown")
 print("PASS: snapshot sizing")
+
+/// Tick decisions: the pure leader and surface logic behind PlaylistController.tick.
+func tickMedia(_ n: Int, duration: Double) -> MediaEntry {
+    MediaEntry(id: "tick-\(n)", name: "T\(n)", filename: "t\(n).mp4", width: 1, height: 1, durationSeconds: duration, frameRate: 30, addedAtUnix: 0)
+}
+let tickA = tickMedia(1, duration: 10), tickB = tickMedia(2, duration: 20)
+let tickURLs = [tickA.id: URL(fileURLWithPath: "/v/a.mp4"), tickB.id: URL(fileURLWithPath: "/v/b.mp4")]
+func tickURL(_ id: String) -> URL? {
+    tickURLs[id]
+}
+let tickRule = PlaylistSpec(videoIDs: [tickA.id, tickB.id])
+func tickSample(_ media: MediaEntry, seconds: Double, epoch: Int = 0, ready: Bool = true, failedOn failed: MediaEntry? = nil, serial: Int = 0) -> RendererSample {
+    RendererSample(url: tickURLs[media.id]!, seconds: seconds, epoch: epoch, ready: ready, failedURL: failed.map { tickURLs[$0.id]! }, failureSerial: serial)
+}
+func leaderTick(
+    _ progress: inout DisplayProgress,
+    _ sample: RendererSample?,
+    playable: [MediaEntry] = [tickA, tickB],
+    state: inout PlaylistTick.LeaderState,
+    leaderID: Int = 1,
+) -> PlaylistTick.LeaderOutcome {
+    PlaylistTick.leaderStep(
+        progress: &progress, playable: playable, rule: tickRule,
+        leader: sample.map { PlaylistTick.Leader(id: leaderID, sample: $0) }, state: &state, urlFor: tickURL,
+    )
+}
+var tickProgress = DisplayProgress(displayKey: "d", videoID: tickA.id, positionSeconds: 2)
+var tickState = PlaylistTick.LeaderState()
+var tickOut = leaderTick(&tickProgress, tickSample(tickA, seconds: 2.1), state: &tickState)
+require(tickOut == PlaylistTick.LeaderOutcome() && close(tickProgress.positionSeconds, 2), "first leader sample is a baseline")
+tickOut = leaderTick(&tickProgress, tickSample(tickA, seconds: 5.1), state: &tickState)
+require(!tickOut.crossedBoundary && close(tickProgress.positionSeconds, 5), "leader clock delta advances the timeline")
+tickOut = leaderTick(&tickProgress, tickSample(tickA, seconds: 10.1), state: &tickState)
+require(tickOut.crossedBoundary && tickProgress.videoID == tickB.id && tickProgress.positionSeconds == 0, "boundary moves to the next item")
+// Leader changed and drifted more than 0.25s: seek it back instead of advancing.
+tickProgress = DisplayProgress(displayKey: "d", videoID: tickA.id, positionSeconds: 2)
+tickState = PlaylistTick.LeaderState()
+tickOut = leaderTick(&tickProgress, tickSample(tickA, seconds: 6), state: &tickState, leaderID: 7)
+require(tickOut.resync == PlaylistTick.Play(url: tickURLs[tickA.id]!, position: 2, force: true) && !tickOut.crossedBoundary, "drifted new leader is resynced")
+require(tickState.clock == nil && tickState.leaderID == 7 && close(tickProgress.positionSeconds, 2), "resync resets the clock and records the leader")
+// Not ready, wrong url, no leader or nothing playable: no clock.
+tickState.clock = PresentationClock()
+_ = leaderTick(&tickProgress, tickSample(tickA, seconds: 2, ready: false), state: &tickState, leaderID: 7)
+require(tickState.clock == nil, "an unready leader clears the clock")
+tickState.clock = PresentationClock()
+_ = leaderTick(&tickProgress, tickSample(tickB, seconds: 2), state: &tickState, leaderID: 7)
+require(tickState.clock == nil, "a leader showing another video clears the clock")
+_ = leaderTick(&tickProgress, nil, state: &tickState)
+require(tickState.leaderID == nil, "no leader forgets the leader")
+// A failed leader rejects the current video and leaves the timeline for the controller to reconcile.
+tickProgress = DisplayProgress(displayKey: "d", videoID: tickB.id)
+tickOut = leaderTick(&tickProgress, tickSample(tickB, seconds: 0, failedOn: tickB, serial: 1), state: &tickState)
+require(tickOut.rejectID == tickB.id && tickProgress.videoID == tickB.id, "a failed leader rejects the current video")
+// Surface: play on a new video or boundary, mark applied once.
+let tickCurrent = DisplayProgress(displayKey: "d", videoID: tickB.id, positionSeconds: 3)
+var surfaceOut = PlaylistTick.surfaceStep(current: tickCurrent, url: tickURLs[tickB.id]!, sample: tickSample(tickA, seconds: 0), applied: tickA.id, crossedBoundary: false)
+require(surfaceOut.play == PlaylistTick.Play(url: tickURLs[tickB.id]!, position: 3, force: false) && surfaceOut.markApplied, "a surface on another video is told to play")
+surfaceOut = PlaylistTick.surfaceStep(current: tickCurrent, url: tickURLs[tickB.id]!, sample: tickSample(tickB, seconds: 0), applied: tickA.id, crossedBoundary: false)
+require(surfaceOut.play == nil && surfaceOut.markApplied, "a surface already showing the video is only marked")
+surfaceOut = PlaylistTick.surfaceStep(current: tickCurrent, url: tickURLs[tickB.id]!, sample: tickSample(tickB, seconds: 0), applied: tickB.id, crossedBoundary: false)
+require(surfaceOut.play == nil && !surfaceOut.markApplied, "an applied surface is left alone")
+surfaceOut = PlaylistTick.surfaceStep(current: tickCurrent, url: tickURLs[tickB.id]!, sample: tickSample(tickB, seconds: 0), applied: tickB.id, crossedBoundary: true)
+require(surfaceOut.play?.force == true && surfaceOut.markApplied, "a boundary forces every surface to restart")
+print("PASS: playlist tick decisions")
+
+// Failure recovery: a renderer failure only counts against the video it names, once.
+// (1) Playlist [A, B]: B cannot be opened while A stays loaded. Only B is rejected.
+tickProgress = DisplayProgress(displayKey: "d", videoID: tickB.id)
+tickState = PlaylistTick.LeaderState()
+let staleB = tickSample(tickA, seconds: 3, failedOn: tickB, serial: 1)
+tickOut = leaderTick(&tickProgress, staleB, state: &tickState)
+require(tickOut.rejectID == tickB.id, "a failed open of the current video rejects it")
+tickProgress = DisplayProgress(displayKey: "d", videoID: tickA.id) // the controller reconciles to A
+for _ in 0 ..< 3 {
+    tickOut = leaderTick(&tickProgress, staleB, playable: [tickA], state: &tickState)
+    require(tickOut.rejectID == nil && tickOut.retry == nil, "the failure left over from B must not reject A")
+}
+require(PlaylistTick.surfaceStep(current: tickProgress, url: tickURLs[tickA.id]!, sample: staleB, applied: tickB.id, crossedBoundary: false).play == nil, "A stays loaded without a restart")
+// (2) Single item: the renderer failed, rebuilt itself and shows frames again. A is never rejected.
+tickProgress = DisplayProgress(displayKey: "d", videoID: tickA.id, positionSeconds: 1)
+tickState = PlaylistTick.LeaderState()
+_ = leaderTick(&tickProgress, tickSample(tickA, seconds: 1), playable: [tickA], state: &tickState)
+for step in 1 ... 5 {
+    tickOut = leaderTick(&tickProgress, tickSample(tickA, seconds: 1 + Double(step) / 10, epoch: 1), playable: [tickA], state: &tickState)
+    require(tickOut.rejectID == nil && tickOut.retry == nil, "a recovered renderer does not reject its video")
+}
+var failures = RenderFailureCounter()
+let failingURL = tickURLs[tickA.id]!
+require(!failures.failed(failingURL) && !failures.failed(failingURL), "two failures in a row are still recovered")
+failures.presented()
+require(!failures.failed(failingURL) && !failures.failed(failingURL), "a presented frame restarts the count")
+require(failures.failed(failingURL), "the third failure in a row is final")
+require(!failures.failed(tickURLs[tickB.id]!), "a failure on another asset starts a new count")
+// (3) Single item A was rejected; a reload clears the rejection while the renderer still reports A failed.
+// Expected: the failure is retried once (forced play of A at the current position), not rejected again,
+// and the same stale failure is then ignored until the renderer reports a new one.
+tickProgress = DisplayProgress(displayKey: "d", videoID: tickA.id, positionSeconds: 4)
+tickState = PlaylistTick.LeaderState()
+let failedA = tickSample(tickA, seconds: 4, failedOn: tickA, serial: 9)
+tickOut = leaderTick(&tickProgress, failedA, playable: [tickA], state: &tickState)
+require(tickOut.rejectID == tickA.id, "the first failure of A rejects it")
+tickState.retryRequested = true // reload
+tickOut = leaderTick(&tickProgress, failedA, playable: [tickA], state: &tickState)
+require(tickOut.rejectID == nil && tickOut.retry == PlaylistTick.Play(url: tickURLs[tickA.id]!, position: 4, force: true), "a reload retries the failed video once")
+tickOut = leaderTick(&tickProgress, failedA, playable: [tickA], state: &tickState)
+require(tickOut == PlaylistTick.LeaderOutcome(), "the retry is not repeated while it is in flight")
+tickOut = leaderTick(&tickProgress, tickSample(tickA, seconds: 4, failedOn: tickA, serial: 10), playable: [tickA], state: &tickState)
+require(tickOut.rejectID == tickA.id, "a failed retry is a new failure and rejects again")
+// (4) A failure on a URL other than the current video's is ignored.
+tickProgress = DisplayProgress(displayKey: "d", videoID: tickA.id)
+tickState = PlaylistTick.LeaderState()
+tickOut = leaderTick(&tickProgress, tickSample(tickA, seconds: 0, failedOn: tickB, serial: 5), state: &tickState)
+require(tickOut.rejectID == nil && tickOut.retry == nil, "a failure of another URL does not reject the current video")
+print("PASS: renderer failure recovery decisions")

@@ -3,7 +3,7 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 mkdir -p build/tests
 GO_CONTRACT_OUTPUT="$PWD/build/tests/go-catalog.json" go test -race ./...
-swiftc -swift-version 6 LoopwallExtension/PlaylistTypes.swift LoopwallExtension/PlaybackModel.swift LoopwallExtension/PlaybackPolicy.swift LoopwallExtension/GeometryVerdict.swift LoopwallExtension/SnapshotSizing.swift tests/main.swift -o build/tests/timeline
+swiftc -swift-version 6 LoopwallExtension/PlaylistTypes.swift LoopwallExtension/PlaybackModel.swift LoopwallExtension/PlaylistTick.swift LoopwallExtension/PlaybackPolicy.swift LoopwallExtension/GeometryVerdict.swift LoopwallExtension/SnapshotSizing.swift tests/main.swift -o build/tests/timeline
 build/tests/timeline build/tests/go-catalog.json build/tests/swift-catalog.json
 SWIFT_CONTRACT_OUTPUT="$PWD/build/tests/swift-catalog.json" go test ./internal/catalog -run TestContracts -count=1
 go vet ./...
