@@ -42,7 +42,7 @@ func (a *application) view(c *ui.Context) {
 	// The whole window takes videos and folders dragged from Finder.
 	root := ui.Box(c).Fill().Clip()
 	if files := root.DroppedFiles(); files != nil {
-		a.importPaths(files)
+		a.importPaths(files, nil)
 	}
 	var over float32
 	if root.FileDragOver() {

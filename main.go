@@ -57,16 +57,16 @@ func main() {
 	mygo.Use(updatenative.Plugin)
 	updatesUsed = true
 	if !mygo.App.RequestSingleInstanceLock() {
-		return
+		return // the running instance has the arguments: see secondInstance
 	}
 	app := &application{root: catalog.Root(), section: sectionLibrary}
 	mygo.App.OnWindowAllClosed(func() {})
 	mygo.App.OnActivate(func(visible bool) {
-		if !visible && !(len(os.Args) > 2 && os.Args[1] == "--import") {
+		if _, importing := importArgs(os.Args[1:], ""); !visible && !importing {
 			app.open()
 		}
 	})
-	mygo.App.OnSecondInstance(func(_ []string, _ string) { app.open() })
+	mygo.App.OnSecondInstance(app.secondInstance)
 	mygo.App.OnOpenURL(func(_ string) { app.open() })
 	mygo.App.SetMenu(mygo.NewMenu([]*mygo.MenuItem{{Role: mygo.RoleAppMenu}, {Role: mygo.RoleEditMenu}, {Role: mygo.RoleWindowMenu}}))
 	mygo.App.WhenReady(func() {
@@ -97,20 +97,11 @@ func main() {
 		app.prefs = loadPrefs()
 		mygo.Theme.SetSource(app.prefs.themeSource())
 		app.login = mygo.App.OpenAtLogin()
-		if len(os.Args) > 2 && os.Args[1] == "--import" {
-			go func() {
-				videos, _ := videoFiles(os.Args[2:], app.root)
-				added, errs := app.importFiles(videos)
-				imported := len(added)
-				if err := app.addImported(added); err != nil {
-					imported = 0
-					errs = append(errs, err.Error())
-				} else if err := app.host.NotifyLibraryChanged(); err != nil {
-					errs = append(errs, err.Error())
-				}
-				_ = catalog.AtomicJSON(filepath.Join(app.root, "import-result.json"), map[string]any{"imported": imported, "errors": errs})
+		if paths, importing := importArgs(os.Args[1:], ""); importing {
+			app.importPaths(paths, func(imported int, errs []string) {
+				app.writeImportResult(imported, errs)
 				mygo.App.Quit()
-			}()
+			})
 			return
 		}
 		app.reapLater()
@@ -323,7 +314,7 @@ func (a *application) chooseImport() {
 			case len(paths) == 0:
 				a.status = "已取消导入"
 			default:
-				a.importPaths(paths)
+				a.importPaths(paths, nil)
 			}
 			a.invalidate()
 		})
@@ -331,15 +322,24 @@ func (a *application) chooseImport() {
 }
 
 // importPaths imports the videos among paths, chosen or dropped, and in
-// the folders among them, in the background. On the main thread.
-func (a *application) importPaths(paths []string) {
+// the folders among them, in the background. done, if not nil, is told how
+// many were imported and what went wrong, once, on the main thread. On the
+// main thread.
+func (a *application) importPaths(paths []string, done func(imported int, errs []string)) {
+	finish := func(imported int, errs []string) {
+		if done != nil {
+			done(imported, errs)
+		}
+	}
 	if a.busy {
 		a.status = "正在处理上一批，请稍后再导入"
+		finish(0, []string{a.status})
 		return
 	}
 	videos, skipped := videoFiles(paths, a.root)
 	if len(videos) == 0 {
 		a.status = "没有可导入的视频（支持 MP4、MOV、M4V）"
+		finish(0, []string{a.status})
 		return
 	}
 	a.busy = true
@@ -350,8 +350,17 @@ func (a *application) importPaths(paths []string) {
 		// what changed it meanwhile, as a download, stays.
 		added, errs := a.importFiles(videos)
 		mygo.RunOnMain(func() {
-			saved := a.finish(a.addImported(added))
+			err := a.addImported(added)
+			saved := a.finish(err)
 			a.busy = false
+			imported := len(added)
+			switch {
+			case err != nil:
+				imported = 0
+				errs = append(errs, err.Error())
+			case !saved: // saved, but the extension was not told
+				errs = append(errs, a.status)
+			}
 			if saved {
 				a.status = fmt.Sprintf("已导入 %d 个视频", len(added))
 				if skipped > 0 {
@@ -362,8 +371,54 @@ func (a *application) importPaths(paths []string) {
 				}
 			}
 			a.invalidate()
+			finish(imported, errs)
 		})
 	}()
+}
+
+// importArgs reads the paths of "--import <paths…>" from args, a command
+// line without the program's name, as the first instance is handed a
+// second's. Relative paths are resolved against workingDir, when it is
+// not empty. It reports false for any other command line.
+func importArgs(args []string, workingDir string) ([]string, bool) {
+	if len(args) < 2 || args[0] != "--import" {
+		return nil, false
+	}
+	paths := make([]string, 0, len(args)-1)
+	for _, p := range args[1:] {
+		if workingDir != "" && !filepath.IsAbs(p) {
+			p = filepath.Join(workingDir, p)
+		}
+		paths = append(paths, p)
+	}
+	return paths, true
+}
+
+// writeImportResult tells whoever ran --import how it went.
+func (a *application) writeImportResult(imported int, errs []string) {
+	if errs == nil {
+		errs = []string{}
+	}
+	if err := catalog.AtomicJSON(filepath.Join(a.root, "import-result.json"), map[string]any{"imported": imported, "errors": errs}); err != nil {
+		log.Println(err)
+	}
+}
+
+// secondInstance is what the running app does when another is started,
+// which handed over its command line: "--import" imports the paths, as the
+// command line does when the app is not running; anything else opens the
+// window. On the main thread.
+func (a *application) secondInstance(args []string, workingDir string) {
+	paths, importing := importArgs(args, workingDir)
+	if !importing {
+		a.open()
+		return
+	}
+	if a.host == nil {
+		a.writeImportResult(0, []string{"管理端尚未就绪，请稍后重试"})
+		return
+	}
+	a.importPaths(paths, a.writeImportResult)
 }
 
 // videoFiles expands paths into the videos to import: those of a video's
