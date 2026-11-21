@@ -62,7 +62,7 @@ func NewClient(store *Store, name string) *Client { return &Client{store: store,
 // handshake fails, before anything is sent, with ErrFingerprintMismatch
 // unless the peer presents that. This Mac presents its own certificate
 // too, so the peer can bind what it grants to it. Six digits are the
-// legacy code, of versions before 0.2: they pin whatever certificate
+// legacy code, of versions before the long one: they pin whatever certificate
 // answers, and cannot tell an impersonator.
 func (c *Client) Pair(ctx context.Context, peer Peer, code string) error {
 	if IsLegacyCode(code) {
