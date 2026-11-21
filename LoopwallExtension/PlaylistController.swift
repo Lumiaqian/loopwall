@@ -17,6 +17,7 @@ final class PlaylistController: @unchecked Sendable {
     private var timer: (any DispatchSourceTimer)?
     private var tickMilliseconds = PlaylistCadence.presentingTickMilliseconds
     private var lastSave = Date.distantPast
+    private var lastWritten: PlaylistCadence.RuntimeStructure?
     /// Set by a display reconfiguration; `refreshDisplays` clears it.
     private var displaysDirty = true
     private var lastDisplayRefresh = Date.distantPast
@@ -195,9 +196,6 @@ final class PlaylistController: @unchecked Sendable {
                 leader.play(play.url, at: play.position, force: play.force)
             }
             crossedBoundary = outcome.crossedBoundary
-            if crossedBoundary {
-                lastSave = .distantPast
-            }
 
             sessions[key] = progress
             for (surfaceKey, surface) in surfaces {
@@ -247,9 +245,6 @@ final class PlaylistController: @unchecked Sendable {
             }
         }
         applied = applied.filter { seenRenderers.contains($0.key) }
-        if active != activeKeys || open != lastOpenIDs {
-            lastSave = .distantPast
-        }
         activeKeys = active; lastOpenIDs = open
         adaptTickRate(presenting: !active.isEmpty, displaysAsleep: state.displaysAsleep)
         awake.update(
@@ -258,7 +253,7 @@ final class PlaylistController: @unchecked Sendable {
             active: playing,
             asleep: state.displaysAsleep,
         )
-        if Date().timeIntervalSince(lastSave) >= 5 {
+        if PlaylistCadence.shouldWriteRuntime(current: runtimeStructure(), written: lastWritten, lastWrite: lastSave, now: Date()) {
             save()
         }
     }
@@ -291,20 +286,36 @@ final class PlaylistController: @unchecked Sendable {
         }
     }
 
-    private func save() {
-        let runtime = RuntimeState(
+    private func runtimeErrors() -> [String] {
+        items.isEmpty ? errors + ["播放列表为空或没有可播放的视频，保留末帧"] : errors
+    }
+    private func runtimeStructure() -> PlaylistCadence.RuntimeStructure {
+        PlaylistCadence.RuntimeStructure(
             appliedRevision: config.revision,
+            activeDisplayKeys: activeKeys.sorted(),
+            openVideoIDs: lastOpenIDs.sorted(),
+            videoIDs: sessions.mapValues(\.videoID),
+            errors: runtimeErrors(),
+            keepAwakeActive: awake.isActive,
+        )
+    }
+
+    private func save() {
+        let structure = runtimeStructure()
+        let runtime = RuntimeState(
+            appliedRevision: structure.appliedRevision,
             ruleSignature: persistedRule,
             updatedAtUnix: Date().timeIntervalSince1970,
             displays: sessions.values.sorted { $0.displayKey < $1.displayKey },
-            activeDisplayKeys: activeKeys.sorted(),
-            openVideoIDs: lastOpenIDs.sorted(),
-            keepAwakeActive: awake.isActive,
-            errors: items.isEmpty ? errors + ["播放列表为空或没有可播放的视频，保留末帧"] : errors,
+            activeDisplayKeys: structure.activeDisplayKeys,
+            openVideoIDs: structure.openVideoIDs,
+            keepAwakeActive: structure.keepAwakeActive,
+            errors: structure.errors,
         )
         do {
             try JSONEncoder().encode(runtime).write(to: Self.runtimeURL, options: .atomic)
             lastSave = Date()
+            lastWritten = structure
         } catch { extensionLog("[Playlist] Cannot save progress: \(error)") }
     }
 }

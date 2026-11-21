@@ -745,7 +745,7 @@ type displayState struct {
 }
 
 func (a *application) runtimeFresh() bool {
-	return time.Since(time.Unix(int64(a.runtime.UpdatedAtUnix), 0)) < 15*time.Second
+	return a.runtime.Fresh(time.Now())
 }
 
 func (a *application) displayState(key string) displayState {

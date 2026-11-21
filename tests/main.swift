@@ -272,3 +272,29 @@ require(PlaylistCadence.tickMilliseconds(presenting: false, displaysAsleep: fals
 require(PlaylistCadence.tickMilliseconds(presenting: true, displaysAsleep: true) == 1_000, "asleep displays tick at 1 Hz")
 require(PlaylistCadence.tickMilliseconds(presenting: false, displaysAsleep: true) == 1_000, "nothing presented and asleep ticks at 1 Hz")
 print("PASS: adaptive tick rate")
+
+/// runtime.json writes: structural changes at once, positions on a 10 s heartbeat.
+let baseStructure = PlaylistCadence.RuntimeStructure(
+    appliedRevision: 3, activeDisplayKeys: ["A"], openVideoIDs: ["x"], videoIDs: ["A": "x"], errors: [], keepAwakeActive: false,
+)
+let wroteAt = Date(timeIntervalSince1970: 9_000)
+func writeDue(_ current: PlaylistCadence.RuntimeStructure, after seconds: Double, written: PlaylistCadence.RuntimeStructure? = baseStructure) -> Bool {
+    PlaylistCadence.shouldWriteRuntime(current: current, written: written, lastWrite: wroteAt, now: wroteAt.addingTimeInterval(seconds))
+}
+require(!writeDue(baseStructure, after: 0.1) && !writeDue(baseStructure, after: 9.9), "an unchanged report waits for the heartbeat")
+require(writeDue(baseStructure, after: 10), "the heartbeat rewrites positions every 10 s")
+require(writeDue(baseStructure, after: 0.1, written: nil), "the first report is written at once")
+var changedStructure = baseStructure
+changedStructure.appliedRevision = 4
+require(writeDue(changedStructure, after: 0.1), "a newly applied revision is written at once")
+changedStructure = baseStructure; changedStructure.activeDisplayKeys = []
+require(writeDue(changedStructure, after: 0.1), "a display going inactive is written at once")
+changedStructure = baseStructure; changedStructure.openVideoIDs = []
+require(writeDue(changedStructure, after: 0.1), "a released reader is written at once (it unblocks deletion)")
+changedStructure = baseStructure; changedStructure.videoIDs["A"] = "y"
+require(writeDue(changedStructure, after: 0.1), "a display switching video is written at once")
+changedStructure = baseStructure; changedStructure.errors = ["e"]
+require(writeDue(changedStructure, after: 0.1), "a new error is written at once")
+changedStructure = baseStructure; changedStructure.keepAwakeActive = true
+require(writeDue(changedStructure, after: 0.1), "a keep-awake change is written at once")
+print("PASS: runtime write policy")
