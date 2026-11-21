@@ -15,6 +15,7 @@ final class PlaylistController: @unchecked Sendable {
     private var persistedRule: String?
     private var applied: [Int: String] = [:]
     private var timer: (any DispatchSourceTimer)?
+    private var tickMilliseconds = PlaylistCadence.presentingTickMilliseconds
     private var lastSave = Date.distantPast
     /// Set by a display reconfiguration; `refreshDisplays` clears it.
     private var displaysDirty = true
@@ -56,7 +57,7 @@ final class PlaylistController: @unchecked Sendable {
         queue.async { [self] in
             reloadOnQueue()
             let timer = DispatchSource.makeTimerSource(queue: queue)
-            timer.schedule(deadline: .now(), repeating: .milliseconds(100))
+            timer.schedule(deadline: .now(), repeating: .milliseconds(tickMilliseconds))
             timer.setEventHandler { [weak self] in self?.tick() }
             self.timer = timer; timer.resume()
         }
@@ -250,6 +251,7 @@ final class PlaylistController: @unchecked Sendable {
             lastSave = .distantPast
         }
         activeKeys = active; lastOpenIDs = open
+        adaptTickRate(presenting: !active.isEmpty, displaysAsleep: state.displaysAsleep)
         awake.update(
             enabled: config.playlist.keepAwakeWhenLockedOnAC,
             locked: state.screenLocked,
@@ -259,6 +261,13 @@ final class PlaylistController: @unchecked Sendable {
         if Date().timeIntervalSince(lastSave) >= 5 {
             save()
         }
+    }
+    /// Reschedule the timer only when the rate actually changes.
+    private func adaptTickRate(presenting: Bool, displaysAsleep: Bool) {
+        let wanted = PlaylistCadence.tickMilliseconds(presenting: presenting, displaysAsleep: displaysAsleep)
+        guard wanted != tickMilliseconds else { return }
+        tickMilliseconds = wanted
+        timer?.schedule(deadline: .now() + .milliseconds(wanted), repeating: .milliseconds(wanted))
     }
     /// Reattach after an empty initial list becomes playable or a corrupt first
     /// asset was rejected. The registry claim prevents racing the XPC acquire task.

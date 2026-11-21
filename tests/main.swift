@@ -265,3 +265,10 @@ require(!PlaylistCadence.displayRefreshDue(dirty: false, lastRefresh: refreshedA
 require(PlaylistCadence.displayRefreshDue(dirty: true, lastRefresh: refreshedAt, now: refreshedAt.addingTimeInterval(0.1)), "a reconfiguration refreshes at once")
 require(PlaylistCadence.displayRefreshDue(dirty: false, lastRefresh: refreshedAt, now: refreshedAt.addingTimeInterval(5)), "the safety interval refreshes a clean list")
 print("PASS: display refresh cadence")
+
+// Adaptive tick: 10 Hz only while a desktop surface is presented on awake displays.
+require(PlaylistCadence.tickMilliseconds(presenting: true, displaysAsleep: false) == 100, "a presented surface ticks at 10 Hz")
+require(PlaylistCadence.tickMilliseconds(presenting: false, displaysAsleep: false) == 1_000, "nothing presented ticks at 1 Hz")
+require(PlaylistCadence.tickMilliseconds(presenting: true, displaysAsleep: true) == 1_000, "asleep displays tick at 1 Hz")
+require(PlaylistCadence.tickMilliseconds(presenting: false, displaysAsleep: true) == 1_000, "nothing presented and asleep ticks at 1 Hz")
+print("PASS: adaptive tick rate")
