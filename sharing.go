@@ -380,8 +380,7 @@ func (a *application) pullVideo(p share.Peer, it share.Item) {
 				return
 			}
 			delete(s.pulls, key)
-			a.addMedia(m)
-			if !a.save() {
+			if !a.finish(a.addImported([]catalog.MediaEntry{m})) {
 				return
 			}
 			if err := s.store.RecordImport(p.Device, it.ID, m.ID); err != nil {

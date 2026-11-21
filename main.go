@@ -101,9 +101,9 @@ func main() {
 			go func() {
 				videos, _ := videoFiles(os.Args[2:], app.root)
 				added, errs := app.importFiles(videos)
-				app.addMedia(added...)
 				imported := len(added)
-				if err := catalog.Save(app.root, &app.config); err != nil {
+				if err := app.addImported(added); err != nil {
+					imported = 0
 					errs = append(errs, err.Error())
 				} else if err := app.host.NotifyLibraryChanged(); err != nil {
 					errs = append(errs, err.Error())
@@ -194,8 +194,41 @@ func (a *application) open() {
 func openWallpaperSettings() {
 	_ = mygo.Shell.OpenExternal("x-apple.systempreferences:com.apple.Wallpaper-Settings.extension")
 }
-func (a *application) save() bool {
-	if err := catalog.Save(a.root, &a.config); err != nil {
+
+// saveCatalog writes the library's configuration; tests replace it.
+var saveCatalog = catalog.Save
+
+// cloneConfig copies c deeply enough that editing the copy leaves c alone.
+func cloneConfig(c catalog.Config) catalog.Config {
+	c.RemovedMediaIDs = slices.Clone(c.RemovedMediaIDs)
+	c.Media = slices.Clone(c.Media)
+	c.Playlist.VideoIDs = slices.Clone(c.Playlist.VideoIDs)
+	c.Playlist.Pins = maps.Clone(c.Playlist.Pins)
+	return c
+}
+
+// update applies edit to a copy of the configuration, saves the copy and
+// only then makes it the app's: a save that fails leaves memory as the disk
+// still is.
+func (a *application) update(edit func(*catalog.Config)) error {
+	next := cloneConfig(a.config)
+	edit(&next)
+	if err := saveCatalog(a.root, &next); err != nil {
+		return err
+	}
+	a.config = next
+	return nil
+}
+
+// commit is update, then telling the extension, and saying how it went.
+func (a *application) commit(edit func(*catalog.Config)) bool {
+	return a.finish(a.update(edit))
+}
+
+// finish says how a save, whose result is err, went, and tells the
+// extension of a saved one.
+func (a *application) finish(err error) bool {
+	if err != nil {
 		a.status = "保存失败：" + err.Error()
 		return false
 	}
@@ -240,13 +273,25 @@ func (a *application) importFiles(paths []string) ([]catalog.MediaEntry, []strin
 	return added, errs
 }
 
-// addMedia adds imported videos to the library and the end of the
-// playlist, unsaved.
-func (a *application) addMedia(entries ...catalog.MediaEntry) {
+// addMedia adds imported videos to c's library and the end of its
+// playlist.
+func addMedia(c *catalog.Config, entries ...catalog.MediaEntry) {
 	for _, m := range entries {
-		a.config.Media = append(a.config.Media, m)
-		a.config.Playlist.VideoIDs = append(a.config.Playlist.VideoIDs, m.ID)
+		c.Media = append(c.Media, m)
+		c.Playlist.VideoIDs = append(c.Playlist.VideoIDs, m.ID)
 	}
+}
+
+// addImported saves the library with entries added. When that fails, the
+// copies already published in videos/ are removed, so nothing is orphaned.
+func (a *application) addImported(entries []catalog.MediaEntry) error {
+	err := a.update(func(c *catalog.Config) { addMedia(c, entries...) })
+	if err != nil {
+		for _, m := range entries {
+			_ = os.RemoveAll(filepath.Join(a.root, "videos", m.ID))
+		}
+	}
+	return err
 }
 func (a *application) chooseImport() {
 	if a.busy {
@@ -292,9 +337,8 @@ func (a *application) importPaths(paths []string) {
 		// what changed it meanwhile, as a download, stays.
 		added, errs := a.importFiles(videos)
 		mygo.RunOnMain(func() {
-			a.addMedia(added...)
+			saved := a.finish(a.addImported(added))
 			a.busy = false
-			saved := a.save()
 			a.loadThumbnails()
 			if saved {
 				a.status = fmt.Sprintf("已导入 %d 个视频", len(added))
@@ -381,12 +425,15 @@ func (a *application) deleteMedia(m catalog.MediaEntry) {
 		mygo.RunOnMain(func() {
 			a.busy = false
 			if err == nil && r.Button == 1 {
-				a.config.Playlist.VideoIDs = slices.DeleteFunc(a.config.Playlist.VideoIDs, func(id string) bool { return id == m.ID })
-				maps.DeleteFunc(a.config.Playlist.Pins, func(_, id string) bool { return id == m.ID })
-				a.config.Media = slices.DeleteFunc(a.config.Media, func(e catalog.MediaEntry) bool { return e.ID == m.ID })
-				a.config.RemovedMediaIDs = append(a.config.RemovedMediaIDs, m.ID)
-				delete(a.thumbs, m.ID)
-				saved := a.save()
+				saved := a.commit(func(c *catalog.Config) {
+					c.Playlist.VideoIDs = slices.DeleteFunc(c.Playlist.VideoIDs, func(id string) bool { return id == m.ID })
+					maps.DeleteFunc(c.Playlist.Pins, func(_, id string) bool { return id == m.ID })
+					c.Media = slices.DeleteFunc(c.Media, func(e catalog.MediaEntry) bool { return e.ID == m.ID })
+					c.RemovedMediaIDs = append(c.RemovedMediaIDs, m.ID)
+				})
+				if _, ok := a.entry(m.ID); !ok {
+					delete(a.thumbs, m.ID)
+				}
 				if a.previewWindow != nil {
 					a.previewWindow.Close()
 				}
