@@ -61,6 +61,22 @@ func serve(t *testing.T, root string) (*Server, *Store, Peer) {
 	return s, st, Peer{Name: "书房的 Mac", Device: st.Device(), Addr: Addr("127.0.0.1", int64(port))}
 }
 
+// wrongCode is a well-formed long code of the server whose store is st,
+// with a secret that is not its current one (all but one in a million are
+// not).
+func wrongCode(t *testing.T, st *Store) string {
+	t.Helper()
+	fp, err := st.CertFingerprint()
+	if err != nil {
+		t.Fatal(err)
+	}
+	code, err := EncodePairCode(fp, "000000")
+	if err != nil {
+		t.Fatal(err)
+	}
+	return code
+}
+
 func TestPairListDownload(t *testing.T) {
 	ctx := context.Background()
 	root, video := library(t)
@@ -70,14 +86,14 @@ func TestPairListDownload(t *testing.T) {
 	if _, err := client.Library(ctx, peer); !errors.Is(err, ErrNotPaired) {
 		t.Fatalf("unpaired: %v, want ErrNotPaired", err)
 	}
-	if err := client.Pair(ctx, peer, "not-it"); !errors.Is(err, ErrWrongCode) {
+	if err := client.Pair(ctx, peer, wrongCode(t, served)); !errors.Is(err, ErrWrongCode) {
 		t.Fatalf("a wrong code: %v", err)
 	}
-	code := s.Code()
+	code := s.PairingCode()
 	if err := client.Pair(ctx, peer, code); err != nil {
 		t.Fatal(err)
 	}
-	if s.Code() == code {
+	if s.PairingCode() == code {
 		t.Error("the code did not turn over after pairing")
 	}
 	if g := served.Granted()[client.store.Device()]; g.Name != "客厅的 Mac" || g.TokenHash == "" {
@@ -120,11 +136,11 @@ func TestPairListDownload(t *testing.T) {
 func TestWrongCodesVoidTheCode(t *testing.T) {
 	ctx := context.Background()
 	root, _ := library(t)
-	s, _, peer := serve(t, root)
+	s, served, peer := serve(t, root)
 	client := NewClient(open(t), "x")
-	code := s.Code()
+	code := s.PairingCode()
 	for range maxFailures {
-		if err := client.Pair(ctx, peer, "000000x"); !errors.Is(err, ErrWrongCode) {
+		if err := client.Pair(ctx, peer, wrongCode(t, served)); !errors.Is(err, ErrWrongCode) {
 			t.Fatal(err)
 		}
 	}
@@ -135,7 +151,7 @@ func TestWrongCodesVoidTheCode(t *testing.T) {
 		t.Fatalf("the voided code paired: %v", err)
 	}
 	s.NewCode()
-	if err := client.Pair(ctx, peer, s.Code()); err != nil {
+	if err := client.Pair(ctx, peer, s.PairingCode()); err != nil {
 		t.Fatalf("a new code: %v", err)
 	}
 }
@@ -145,7 +161,7 @@ func TestChangedCertificate(t *testing.T) {
 	root, _ := library(t)
 	s, _, peer := serve(t, root)
 	client := NewClient(open(t), "x")
-	if err := client.Pair(ctx, peer, s.Code()); err != nil {
+	if err := client.Pair(ctx, peer, s.PairingCode()); err != nil {
 		t.Fatal(err)
 	}
 	p, _ := client.store.Paired(peer.Device)
@@ -203,7 +219,7 @@ func TestPairingIsMutual(t *testing.T) {
 	clientA, clientB := NewClient(storeA, "客厅的 Mac"), NewClient(storeB, "书房的 Mac")
 
 	// A wrong code grants nothing in return.
-	if err := clientB.Pair(ctx, peerA, "wrong"); !errors.Is(err, ErrWrongCode) {
+	if err := clientB.Pair(ctx, peerA, wrongCode(t, storeA)); !errors.Is(err, ErrWrongCode) {
 		t.Fatal(err)
 	}
 	if _, ok := storeB.granted(storeA.Device()); ok {
@@ -211,7 +227,7 @@ func TestPairingIsMutual(t *testing.T) {
 	}
 
 	// B types A's code: B pulls from A, and A from B.
-	if err := clientB.Pair(ctx, peerA, serverA.Code()); err != nil {
+	if err := clientB.Pair(ctx, peerA, serverA.PairingCode()); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := clientB.Library(ctx, peerA); err != nil {
@@ -244,7 +260,7 @@ func TestPairingIsMutual(t *testing.T) {
 	}
 	// Unpairing a peer that is gone still forgets it here.
 	serverA.NewCode()
-	if err = clientB.Pair(ctx, peerA, serverA.Code()); err != nil {
+	if err = clientB.Pair(ctx, peerA, serverA.PairingCode()); err != nil {
 		t.Fatal(err)
 	}
 	if err = clientB.Unpair(ctx, storeA.Device(), ""); err != nil {
@@ -260,9 +276,10 @@ func TestPairingIsMutual(t *testing.T) {
 func TestOldPeerPairsOneWay(t *testing.T) {
 	root, _ := library(t)
 	s, st, peer := serve(t, root)
+	s.SetLegacy(true)
 	old := open(t)
 	body := `{"device":"` + old.Device() + `","name":"旧版","code":"` + s.Code() + `"}`
-	hc := httpClient(func(string) error { return nil }, 5*time.Second)
+	hc := httpClient(nil, func(string) error { return nil }, nil, 5*time.Second)
 	resp, err := hc.Post("https://"+peer.Addr+"/v1/pair", "application/json", strings.NewReader(body))
 	if err != nil || resp.StatusCode != 200 {
 		t.Fatalf("pair: %v %v", resp, err)

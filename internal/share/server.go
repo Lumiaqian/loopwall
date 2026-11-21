@@ -36,10 +36,26 @@ type Item struct {
 	Size            int64   `json:"size"`
 }
 
+// pairVersion is the version of the pairing request that binds it to
+// certificates. A request that names none is of versions before it, whose
+// code is six digits and whose peer is not told from another.
+const pairVersion = 2
+
+// errHeader names, on a refusal, why, where the status alone cannot:
+// versions before 2 know a 403 as a wrong code and nothing else.
+const (
+	errHeader       = "X-Loopwall-Error"
+	errLegacyDenied = "legacy-disabled"
+)
+
 type pairRequest struct {
-	Device string `json:"device"`
-	Name   string `json:"name"`
-	Code   string `json:"code"`
+	// Version is pairVersion for a request that presents a client
+	// certificate: the one whose fingerprint Back names.
+	Version int    `json:"version,omitempty"`
+	Device  string `json:"device"`
+	Name    string `json:"name"`
+	// Code is the one-time secret, six digits.
+	Code string `json:"code"`
 	// Back is the access the pairing device grants in return, so that one
 	// code pairs both ways. Versions before 0.1.3 send none.
 	Back *backAccess `json:"back,omitempty"`
@@ -79,11 +95,12 @@ type Server struct {
 	// failDelay slows each wrong code down.
 	failDelay time.Duration
 
-	mu       sync.Mutex
-	code     string
-	failures int
-	srv      *http.Server
-	port     int
+	mu          sync.Mutex
+	code        string
+	failures    int
+	allowLegacy bool
+	srv         *http.Server
+	port        int
 }
 
 // NewServer makes a server sharing the library at root.
@@ -104,11 +121,30 @@ func (s *Server) NewCode() {
 	s.mu.Unlock()
 }
 
-// Code is the pairing code, empty once too many wrong ones voided it.
+// Code is the one-time secret, six digits, empty once too many wrong ones
+// voided it: what a legacy code is, and what the long one ends in.
 func (s *Server) Code() string {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.code
+}
+
+// PairingCode is the code to show, version 2: this server's certificate
+// and the secret, as ParsePairCode reads. Empty once the secret is void.
+func (s *Server) PairingCode() string {
+	secret := s.Code()
+	if secret == "" {
+		return ""
+	}
+	fp, err := s.store.CertFingerprint()
+	if err != nil {
+		return ""
+	}
+	code, err := EncodePairCode(fp, secret)
+	if err != nil {
+		return ""
+	}
+	return code
 }
 
 // Start serves on addr, ":0" for any port, and returns the port.
@@ -123,8 +159,14 @@ func (s *Server) Start(addr string) (int, error) {
 	}
 	ln = localOnly(ln)
 	srv := &http.Server{
-		Handler:           s.Handler(),
-		TLSConfig:         &tls.Config{Certificates: []tls.Certificate{cert}, MinVersion: tls.VersionTLS13},
+		Handler: s.Handler(),
+		TLSConfig: &tls.Config{
+			Certificates: []tls.Certificate{cert},
+			MinVersion:   tls.VersionTLS13,
+			// Asked for, not required: a client before version 2 sends
+			// none. The chain is not verified, the fingerprint is.
+			ClientAuth: tls.RequestClientCert,
+		},
 		ReadHeaderTimeout: 10 * time.Second,
 		// Requests are small: a slow connection cannot hold a slot.
 		ReadTimeout:    30 * time.Second,
@@ -138,6 +180,22 @@ func (s *Server) Start(addr string) (int, error) {
 	s.mu.Unlock()
 	go func() { _ = srv.ServeTLS(ln, "", "") }()
 	return s.Port(), nil
+}
+
+// SetLegacy turns on or off accepting pairing requests of versions before
+// 2, which carry six digits and no certificate, and so cannot tell this
+// Mac from one that impersonates it. Off at first.
+func (s *Server) SetLegacy(on bool) {
+	s.mu.Lock()
+	s.allowLegacy = on
+	s.mu.Unlock()
+}
+
+// Legacy reports whether SetLegacy is on.
+func (s *Server) Legacy() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.allowLegacy
 }
 
 // Port is the port the server listens on, 0 when stopped.
@@ -170,10 +228,43 @@ func (s *Server) Handler() http.Handler {
 	return mux
 }
 
+// peerFingerprint is the fingerprint of the certificate the client of r
+// presented in the handshake, which proved it holds its key.
+func peerFingerprint(r *http.Request) (string, bool) {
+	if r.TLS == nil || len(r.TLS.PeerCertificates) == 0 {
+		return "", false
+	}
+	return Fingerprint(r.TLS.PeerCertificates[0].Raw), true
+}
+
 func (s *Server) pair(w http.ResponseWriter, r *http.Request) {
 	var req pairRequest
 	if err := json.NewDecoder(io.LimitReader(r.Body, 4096)).Decode(&req); err != nil || req.Device == "" || len(req.Device) > 64 {
 		http.Error(w, "bad request", http.StatusBadRequest)
+		return
+	}
+	// What the request must be, before the secret is looked at: a
+	// request that is not well formed is no guess at it.
+	var bound string // the fingerprint of the client's certificate
+	switch {
+	case req.Version > pairVersion:
+		http.Error(w, "unsupported version", http.StatusBadRequest)
+		return
+	case req.Version == pairVersion:
+		fp, ok := peerFingerprint(r)
+		if b := req.Back; !ok || b == nil || !hex64(b.Token) || b.Fingerprint != fp {
+			http.Error(w, "bad request", http.StatusBadRequest)
+			return
+		}
+		bound = fp
+	case !s.Legacy() || s.verifiedDevice(req.Device):
+		// Refused as what it is, not as a guess: the secret is not
+		// looked at, so this is no way to try one. A device paired by the
+		// long code is never re-paired the legacy way, which would replace
+		// its bound grant and pinned certificate on the strength of six
+		// digits.
+		w.Header().Set(errHeader, errLegacyDenied)
+		http.Error(w, "legacy pairing is off", http.StatusForbidden)
 		return
 	}
 	s.mu.Lock()
@@ -194,14 +285,14 @@ func (s *Server) pair(w http.ResponseWriter, r *http.Request) {
 	if name == "" || len(name) > 128 {
 		name = "Mac"
 	}
-	if err := s.store.Grant(req.Device, name, token); err != nil {
+	if err := s.store.Grant(req.Device, name, token, bound); err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
 	// The code proved the device is the user's: what it grants in return,
 	// sent over the same connection, pairs this Mac with it too.
 	if b := req.Back; b != nil && hex64(b.Token) && hex64(b.Fingerprint) {
-		if err := s.store.Pair(req.Device, Paired{Name: name, Token: b.Token, Fingerprint: b.Fingerprint}); err != nil {
+		if err := s.store.Pair(req.Device, Paired{Name: name, Token: b.Token, Fingerprint: b.Fingerprint, Verified: bound != ""}); err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
@@ -226,7 +317,8 @@ func (s *Server) unpair(w http.ResponseWriter, r *http.Request) {
 }
 
 // authorized lets through the requests of paired devices only: the
-// device's identifier and its token.
+// device's identifier and its token, and for a pairing of version 2 the
+// certificate it paired with, presented in this connection's handshake.
 func (s *Server) authorized(h http.HandlerFunc) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		token, _ := strings.CutPrefix(r.Header.Get("Authorization"), "Bearer ")
@@ -234,6 +326,12 @@ func (s *Server) authorized(h http.HandlerFunc) http.Handler {
 		if !ok || token == "" || subtle.ConstantTimeCompare([]byte(hashHex(token)), []byte(g.TokenHash)) != 1 {
 			http.Error(w, "not paired", http.StatusUnauthorized)
 			return
+		}
+		if g.ClientFingerprint != "" {
+			if fp, ok := peerFingerprint(r); !ok || subtle.ConstantTimeCompare([]byte(fp), []byte(g.ClientFingerprint)) != 1 {
+				http.Error(w, "not paired", http.StatusUnauthorized)
+				return
+			}
 		}
 		h(w, r)
 	})
@@ -292,4 +390,14 @@ func (s *Server) media(path func(string, catalog.MediaEntry) string) http.Handle
 func writeJSON(w http.ResponseWriter, v any) {
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(v)
+}
+
+// verifiedDevice reports whether device was paired by the long code, either
+// way: its grant is bound to its certificate, or its pin is verified.
+func (s *Server) verifiedDevice(device string) bool {
+	if g, ok := s.store.granted(device); ok && g.ClientFingerprint != "" {
+		return true
+	}
+	p, ok := s.store.Paired(device)
+	return ok && p.Verified
 }

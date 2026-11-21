@@ -30,6 +30,10 @@ type Granted struct {
 	Name      string `json:"name"`
 	TokenHash string `json:"tokenHash"` // SHA-256 of its token, hex
 	PairedAt  int64  `json:"pairedAt"`
+	// ClientFingerprint is the SHA-256, hex, of the certificate the device
+	// paired with: its requests must present that certificate as well as
+	// the token. Empty for a pairing of the legacy kind, by token alone.
+	ClientFingerprint string `json:"clientFingerprint,omitempty"`
 }
 
 // Paired is a Mac this one pulls from.
@@ -37,6 +41,11 @@ type Paired struct {
 	Name        string `json:"name"`
 	Token       string `json:"token"`
 	Fingerprint string `json:"fingerprint"` // SHA-256 of its certificate, hex
+	// Verified is a pairing made with a long code, which named the
+	// peer's certificate before anything was sent. One made with six
+	// digits, or kept from before there were long codes, pinned whatever
+	// answered: it is legacy, and the peer may be an impostor.
+	Verified bool `json:"verified,omitempty"`
 }
 
 // state is share.json: this Mac's identity, the devices granted its
@@ -56,6 +65,9 @@ type Store struct {
 	dir string
 	mu  sync.Mutex
 	s   state
+
+	certMu sync.Mutex
+	cert   *tls.Certificate // loaded once
 }
 
 // OpenStore loads the state kept in dir, making this Mac's identity the
@@ -91,14 +103,15 @@ func (st *Store) Device() string {
 	return st.s.Device
 }
 
-// Grant records a device paired to pull from this Mac, by its token's hash.
-func (st *Store) Grant(device, name, token string) error {
+// Grant records a device paired to pull from this Mac, by its token's hash
+// and, unless empty, the fingerprint of the certificate it must present.
+func (st *Store) Grant(device, name, token, clientFingerprint string) error {
 	st.mu.Lock()
 	defer st.mu.Unlock()
 	if st.s.Granted == nil {
 		st.s.Granted = map[string]Granted{}
 	}
-	st.s.Granted[device] = Granted{Name: name, TokenHash: hashHex(token), PairedAt: time.Now().Unix()}
+	st.s.Granted[device] = Granted{Name: name, TokenHash: hashHex(token), PairedAt: time.Now().Unix(), ClientFingerprint: clientFingerprint}
 	return st.saveLocked()
 }
 
@@ -186,9 +199,32 @@ func (st *Store) RecordImport(device, id, local string) error {
 	return st.saveLocked()
 }
 
-// Certificate returns the certificate the server presents, making it the
-// first time: self-signed, as the devices pin its fingerprint on pairing.
+// Certificate returns the certificate this Mac presents, as the server and
+// as a client, making it the first time: self-signed, as the devices pin
+// its fingerprint on pairing.
 func (st *Store) Certificate() (tls.Certificate, error) {
+	st.certMu.Lock()
+	defer st.certMu.Unlock()
+	if st.cert == nil {
+		c, err := st.loadCertificate()
+		if err != nil {
+			return tls.Certificate{}, err
+		}
+		st.cert = &c
+	}
+	return *st.cert, nil
+}
+
+// CertFingerprint is the fingerprint of Certificate, in hex.
+func (st *Store) CertFingerprint() (string, error) {
+	c, err := st.Certificate()
+	if err != nil {
+		return "", err
+	}
+	return Fingerprint(c.Certificate[0]), nil
+}
+
+func (st *Store) loadCertificate() (tls.Certificate, error) {
 	certPath, keyPath := filepath.Join(st.dir, "share-cert.pem"), filepath.Join(st.dir, "share-key.pem")
 	if c, err := tls.LoadX509KeyPair(certPath, keyPath); err == nil {
 		return c, nil

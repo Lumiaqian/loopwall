@@ -17,6 +17,9 @@ type prefs struct {
 	Accent     string `json:"accent,omitempty"`     // a key of accents; empty is the first
 	Glass      string `json:"glass,omitempty"`      // a key of looks; empty is the standard
 	Share      bool   `json:"share,omitempty"`      // share the library on the local network
+	// ShareLegacy lets Macs of versions before the long code pair by six digits, which cannot
+	// tell this Mac from an impersonator (internal/share).
+	ShareLegacy bool `json:"shareLegacy,omitempty"`
 	// LastVersion is the version the app last launched as (update.go).
 	LastVersion string `json:"lastVersion,omitempty"`
 }
