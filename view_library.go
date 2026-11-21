@@ -1,0 +1,144 @@
+package main
+
+import (
+	"fmt"
+	"slices"
+	"strings"
+
+	"github.com/Lumiaqian/loopwall/internal/catalog"
+	"github.com/egoist/mygo/plugins/glass"
+	"github.com/egoist/mygo/ui"
+)
+
+func (a *application) libraryView(c *ui.Context) {
+	inList := 0
+	for _, m := range a.config.Media {
+		if slices.Contains(a.config.Playlist.VideoIDs, m.ID) {
+			inList++
+		}
+	}
+	subtitle := fmt.Sprintf("%d 个视频 · %d 个在轮播中 · 原画质，静音播放", len(a.config.Media), inList)
+	pageFrame(c, "资料库", subtitle, func() {
+		label := "导入视频"
+		if a.busy {
+			label = "处理中…"
+		}
+		glassButton(c, iconImport, label, true).Disabled(a.busy).OnClick(a.chooseImport)
+	}, func(top float32) {
+		if len(a.config.Media) == 0 {
+			emptyState(c, iconFilm, "还没有视频", "把视频或文件夹拖到这里，或点右上角「导入视频」。支持 MP4、MOV、M4V，原画质复制，不重新编码。")
+			return
+		}
+		a.grid.Key = func(i int) any { return a.config.Media[i].ID }
+		a.grid.Label = func(i int) string { return a.config.Media[i].Name }
+		overlay(ui.GridView(c, &a.grid, len(a.config.Media), 220, 214, func(i int) {
+			a.mediaCard(c, a.config.Media[i])
+		})).ScrollbarInsets(top, 0, 0, 0).Gap(18).Padding(top+14, 24, 24, 24)
+	})
+}
+
+func (a *application) mediaCard(c *ui.Context, m catalog.MediaEntry) {
+	t := c.Theme()
+	order := slices.Index(a.config.Playlist.VideoIDs, m.ID)
+	ui.Column(c).Grow(1).Gap(8).Children(func() {
+		// Thumbnail with the order in the playlist and the duration on it.
+		thumb := ui.Box(c).Grow(1).MinHeight(0).Radius(10).Clip().Background(t.Surface).Cursor(ui.CursorPointer).
+			Shadow(0, 1, 3, 0, ui.RGBA(0, 0, 0, 0.12)).Label("预览 " + m.Name)
+		if thumb.Clicked() {
+			a.previewMedia(m)
+		}
+		hovered := thumb.Hovered()
+		thumb.Children(func() {
+			if bm := a.thumb(m.ID); bm != nil {
+				ui.Image(c, bm).Fill().Fit(ui.Cover)
+			} else {
+				ui.Box(c).Fill().Center().TextColor(t.TextMuted).Children(func() { ui.Icon(c, iconFilm).FontSize(28) })
+			}
+			if hovered {
+				overlay(ui.Box(c)).PassThrough().Center().Children(func() {
+					current.fillControl(c, ui.Box(c).Size(56, 56).Radius(28).Center(), mediaGlass).TextColor(ui.RGB(255, 255, 255)).Children(func() {
+						ui.Icon(c, iconPlay).FontSize(20)
+					})
+				})
+			}
+			if order >= 0 {
+				glassPill(c, fmt.Sprintf("#%d 轮播", order+1), glass.Glass{Tint: t.Accent}, t.AccentText).Absolute().Top(8).Left(8)
+			}
+			glassPill(c, clock(m.DurationSeconds), mediaGlass, ui.RGB(255, 255, 255)).Absolute().Bottom(8).Right(8)
+		})
+		ui.Row(c).Gap(6).AlignItems(ui.Center).Children(func() {
+			if a.selected == m.ID {
+				ui.TextInput(c, &a.rename).Grow(1).Radius(999).Label("视频名称").OnSubmit(func() { a.commitRename(m.ID) })
+				iconButton(c, iconCheck, "保存名称").Disabled(a.busy || strings.TrimSpace(a.rename) == "").OnClick(func() { a.commitRename(m.ID) })
+				iconButton(c, iconX, "取消").OnClick(func() { a.selected = "" })
+				return
+			}
+			ui.Column(c).Gap(2).Grow(1).MinWidth(0).Children(func() {
+				current.onBackdrop(c, ui.Text(c, m.Name).FontSize(13).FontWeight(600).SingleLine(), false)
+				meta := fmt.Sprintf("%s · %s fps", resolution(m.Width, m.Height), trimFloat(m.FrameRate))
+				if on := a.pinnedOn(m.ID); len(on) > 0 {
+					meta += " · 固定在 " + strings.Join(on, "、")
+				}
+				current.onBackdrop(c, ui.Text(c, meta).FontSize(11).SingleLine(), true)
+			})
+			if order >= 0 {
+				iconButton(c, iconCheck, "移出轮播").TextColor(t.Accent).Disabled(a.busy).OnClick(func() { a.togglePlaylist(m.ID) })
+			} else {
+				iconButton(c, iconPlus, "加入轮播").Disabled(a.busy).OnClick(func() { a.togglePlaylist(m.ID) })
+			}
+			iconButton(c, iconMore, "更多").Disabled(a.busy).Menu(func(menu *ui.Menu) {
+				if menu.Item("预览").Chosen() {
+					a.previewMedia(m)
+				}
+				if menu.Item("重命名…").Chosen() {
+					a.selected, a.rename = m.ID, m.Name
+				}
+				menu.Submenu("设为壁纸", func(sub *ui.Menu) {
+					for _, d := range a.displays {
+						on := a.config.Playlist.Pins[d.Identifier] == m.ID
+						if sub.Item(d.Name).ID("wall-" + d.Identifier).Checked(on).Chosen() {
+							if on {
+								a.pinDisplay(d.Identifier, "") // chosen again: back to the playlist
+							} else {
+								a.pinDisplay(d.Identifier, m.ID)
+							}
+						}
+					}
+					sub.Separator()
+					if sub.Item("所有显示器").Chosen() {
+						a.pinAll(m.ID)
+					}
+				}).Disabled(len(a.displays) == 0)
+				menu.Separator()
+				if menu.Item("从资料库删除…").Chosen() {
+					a.deleteMedia(m)
+				}
+			})
+		})
+	})
+}
+
+func (a *application) commitRename(id string) {
+	name := strings.TrimSpace(a.rename)
+	if a.busy || name == "" {
+		return
+	}
+	a.selected = ""
+	a.commit(func(c *catalog.Config) {
+		for i := range c.Media {
+			if c.Media[i].ID == id {
+				c.Media[i].Name = name
+			}
+		}
+	})
+}
+
+func (a *application) togglePlaylist(id string) {
+	a.commit(func(c *catalog.Config) {
+		if slices.Contains(c.Playlist.VideoIDs, id) {
+			c.Playlist.VideoIDs = slices.DeleteFunc(c.Playlist.VideoIDs, func(v string) bool { return v == id })
+		} else {
+			c.Playlist.VideoIDs = append(c.Playlist.VideoIDs, id)
+		}
+	})
+}
