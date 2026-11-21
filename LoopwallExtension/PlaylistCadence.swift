@@ -11,4 +11,14 @@ nonisolated enum PlaylistCadence {
     static func displayRefreshDue(dirty: Bool, lastRefresh: Date, now: Date) -> Bool {
         dirty || now.timeIntervalSince(lastRefresh) >= displayRefreshInterval
     }
+
+    /// Tick period while a desktop surface is presented, and while nothing is.
+    static let presentingTickMilliseconds = 100
+    static let idleTickMilliseconds = 1_000
+
+    /// 10 Hz only while some desktop surface is actually presented and the displays
+    /// are awake; otherwise the tick only has to notice that something started.
+    static func tickMilliseconds(presenting: Bool, displaysAsleep: Bool) -> Int {
+        presenting && !displaysAsleep ? presentingTickMilliseconds : idleTickMilliseconds
+    }
 }
