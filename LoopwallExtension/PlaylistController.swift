@@ -287,7 +287,14 @@ final class PlaylistController: @unchecked Sendable {
     }
 
     private func runtimeErrors() -> [String] {
-        items.isEmpty ? errors + ["播放列表为空或没有可播放的视频，保留末帧"] : errors
+        var lines = errors
+        if items.isEmpty {
+            lines.append("播放列表为空或没有可播放的视频，保留末帧")
+        }
+        if let line = PlaylistCadence.unverifiedCallerError(count: CallerValidation.unverifiedCount) {
+            lines.append(line)
+        }
+        return lines
     }
     private func runtimeStructure() -> PlaylistCadence.RuntimeStructure {
         PlaylistCadence.RuntimeStructure(
