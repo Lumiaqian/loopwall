@@ -4,7 +4,7 @@
 
 Go 是资料库和配置的唯一产品写入方，Swift 扩展是进度的唯一写入方。实际壁纸视频通过 AVAssetReader → AVSampleBufferDisplayLayer → 远程 CAContext 播放，帧数据不经过 Go。管理端自己的预览使用 MyGO 的系统视频播放器，与桌面会话分开。
 
-原 Phosphene 的 Steam/Workshop、SwiftUI 管理端、视频变体生成、全屏/遮挡/游戏/电量暂停均已移除。保留 Apple 调用者验证、独立表面上下文、原生解码、缓存快照、屏幕尺寸恢复与系统生命周期处理。
+原 Phosphene 的 Steam/Workshop、SwiftUI 管理端、视频变体生成、全屏/遮挡/游戏暂停均已移除；电量相关暂停只保留为可选的省电模式（默认关闭）。保留 Apple 调用者验证、独立表面上下文、原生解码、缓存快照、屏幕尺寸恢复与系统生命周期处理。
 
 ## JSON v1
 
@@ -21,9 +21,9 @@ Go 是资料库和配置的唯一产品写入方，Swift 扩展是进度的唯�
 
 `MediaEntry` 保存 `id`、`name`、`filename`、`width`、`height`、`durationSeconds`、`frameRate`、`addedAtUnix`。ID 为 UUID，文件名必须是安全的单个路径组件。原片在 `videos/<id>/<filename>`，缩略图为同目录 `thumbnail.jpg`。
 
-`PlaylistSpec` 保存 `videoIDs`、`advanceMode`（`end` 或 `duration`）、`intervalSeconds`（正整数）、`keepAwakeWhenLockedOnAC`，以及可选的 `pins`：显示器 UUID → 资料库中的视频 ID。被固定的显示器只循环该视频，其余显示器播放列表；固定的视频无法解码或文件缺失时，该屏退回播放列表而不黑屏。字段可省略，旧配置无需迁移，`schemaVersion` 仍为 1。
+`PlaylistSpec` 保存 `videoIDs`、`advanceMode`（`end` 或 `duration`）、`intervalSeconds`（正整数）、`keepAwakeWhenLockedOnAC`，以及可选的 `powerSaving` 与 `pins`：显示器 UUID → 资料库中的视频 ID。被固定的显示器只循环该视频，其余显示器播放列表；固定的视频无法解码或文件缺失时，该屏退回播放列表而不黑屏。`powerSaving` 为 true 时，用电池、开启低电量模式或热状态达到 serious/critical，所有表面都暂停并停在当前画面，30 秒后原有的深度暂停再释放解码器；扩展用 `NSProcessInfoPowerStateDidChange`、热状态通知和 IOPS 电源通知取得这些条件，仅在条件变化时发出事件，由纯函数 reducer 决定目标。`pins` 与 `powerSaving` 字段可省略，旧配置无需迁移，`schemaVersion` 仍为 1。
 
-`runtime.json` 保存 `schemaVersion`、`appliedRevision`、`updatedAtUnix`、`ruleSignature`、`displays`、`activeDisplayKeys`、`openVideoIDs`、`keepAwakeActive`、`errors`。每个 `DisplayProgress` 保存 `displayKey`、`videoID`、`positionSeconds`、`itemElapsedSeconds`。
+`runtime.json` 保存 `schemaVersion`、`appliedRevision`、`updatedAtUnix`、`ruleSignature`、`displays`、`activeDisplayKeys`、`openVideoIDs`、`keepAwakeActive`、可选的 `powerSavingActive`、`errors`。`powerSavingActive` 为 true 表示壁纸被省电模式有意暂停，此时 `activeDisplayKeys` 为空不算卡住，管理端不会提示修复。每个 `DisplayProgress` 保存 `displayKey`、`videoID`、`positionSeconds`、`itemElapsedSeconds`。
 
 Go 通过同目录临时文件、同步并原子 rename 发布配置；扩展通过 `.atomic` 写运行进度。Darwin 通知 `local.lumiaqian.loopwall.libraryChanged` 通知扩展重读，扩展无进程时由下次启动读取。管理端读取运行进度并标明陈旧状态。
 

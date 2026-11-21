@@ -72,11 +72,47 @@ state = PlaybackReducer.reduce(state, .surfaceAcquired(key, displayID: 2, role: 
 require(PlaybackReducer.targets(state)[key]?.policy == .full, "reacquired surface resumes")
 print("PASS: presentation-clock epochs and surface reactivation")
 
+// Optional power saving: off by default; on, it pauses on battery, Low Power Mode or serious heat.
+require(config.playlist.powerSaving == true, "Go powerSaving is read")
+let legacyPlaylist = try JSONDecoder().decode(PlaylistSpec.self, from: Data(#"{"videoIDs":[],"advanceMode":"end","intervalSeconds":60,"keepAwakeWhenLockedOnAC":true}"#.utf8))
+require(legacyPlaylist.powerSaving == nil, "a playlist written before powerSaving decodes unchanged")
+let legacyPlaylistJSON = try String(bytes: JSONEncoder().encode(legacyPlaylist), encoding: .utf8) ?? ""
+require(!legacyPlaylistJSON.contains("powerSaving"), "absent powerSaving stays absent")
+var powerState = PlaybackState()
+powerState = PlaybackReducer.reduce(powerState, .surfaceAcquired(key, displayID: 2, role: .desktop, choice: playlistChoiceID))
+let onBattery = PowerConditions(onBattery: true)
+let lowPower = PowerConditions(lowPowerMode: true)
+let hot = PowerConditions(thermalState: .serious)
+let throttled = PowerConditions(thermalState: .critical)
+let fair = PowerConditions(thermalState: .fair)
+require(!PowerConditions().constrained && !fair.constrained, "AC, normal power and fair heat are unconstrained")
+require(onBattery.constrained && lowPower.constrained && hot.constrained && throttled.constrained, "battery, Low Power Mode and serious or critical heat are constrained")
+for conditions in [onBattery, lowPower, hot, throttled] {
+    powerState = PlaybackReducer.reduce(powerState, .powerChanged(conditions))
+    require(PlaybackReducer.targets(powerState)[key]?.policy == .full, "constrained power does nothing while the setting is off")
+}
+powerState = PlaybackReducer.reduce(powerState, .powerSavingSettingChanged(true))
+for conditions in [onBattery, lowPower, hot, throttled] {
+    powerState = PlaybackReducer.reduce(powerState, .powerChanged(conditions))
+    require(PlaybackReducer.targets(powerState)[key]?.policy == .paused && powerState.pausedForPower, "power saving pauses under \(conditions)")
+}
+powerState = PlaybackReducer.reduce(powerState, .powerChanged(fair))
+require(PlaybackReducer.targets(powerState)[key]?.policy == .full && !powerState.pausedForPower, "power saving resumes once unconstrained")
+let previewKey = SurfaceKey(displayID: 3, surfaceUUID: UUID())
+powerState = PlaybackReducer.reduce(powerState, .surfaceAcquired(previewKey, displayID: 3, role: .preview, choice: nil))
+powerState = PlaybackReducer.reduce(powerState, .powerChanged(onBattery))
+require(PlaybackReducer.targets(powerState).values.allSatisfy { $0.policy == .paused }, "power saving pauses every surface")
+powerState = PlaybackReducer.reduce(powerState, .powerSavingSettingChanged(false))
+require(PlaybackReducer.targets(powerState).values.allSatisfy { $0.policy == .full }, "turning the setting off resumes")
+print("PASS: optional power saving")
+
 let fixtureDirectory = URL(fileURLWithPath: CommandLine.arguments[1]).deletingLastPathComponent()
 let goRuntime = try JSONDecoder().decode(RuntimeState.self, from: Data(contentsOf: fixtureDirectory.appendingPathComponent("go-runtime.json")))
 require(goRuntime.displays[0].displayKey == "display-A" && goRuntime.displays[0].positionSeconds == 61.5, "Go runtime is read in seconds")
 require(goRuntime.displays[0].lastSeenUnix == 1_700_000_000, "Go lastSeenUnix is read")
+require(goRuntime.powerSavingActive == true, "Go powerSavingActive is read")
 var swiftRuntime = RuntimeState()
+swiftRuntime.powerSavingActive = true
 var savedDisplay = b
 savedDisplay.displayKey = "display-B"
 savedDisplay.lastSeenUnix = 1_700_000_123
@@ -299,6 +335,8 @@ changedStructure = baseStructure; changedStructure.errors = ["e"]
 require(writeDue(changedStructure, after: 0.1), "a new error is written at once")
 changedStructure = baseStructure; changedStructure.keepAwakeActive = true
 require(writeDue(changedStructure, after: 0.1), "a keep-awake change is written at once")
+changedStructure = baseStructure; changedStructure.powerSavingActive = true
+require(writeDue(changedStructure, after: 0.1), "a power-saving pause is written at once")
 print("PASS: runtime write policy")
 
 /// Session pruning: a display unseen for 30 days is forgotten; legacy files age from now.
