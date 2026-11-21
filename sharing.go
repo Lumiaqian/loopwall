@@ -385,7 +385,7 @@ func (a *application) pullVideo(p share.Peer, it share.Item) {
 		defer cancel()
 		var shown time.Time
 		m, err := catalog.ImportFrom(ctx, a.root, it.Name, it.Ext, func(w io.Writer) error {
-			return s.client.Download(ctx, p, it.ID, w, func(done, total int64) {
+			return s.client.Download(ctx, p, it.ID, it.Size, w, func(done, total int64) {
 				if time.Since(shown) < 150*time.Millisecond && done != total {
 					return
 				}
@@ -426,7 +426,8 @@ func (a *application) pullVideo(p share.Peer, it share.Item) {
 func friendly(err error) string {
 	var netErr net.Error
 	switch {
-	case errors.Is(err, share.ErrNotPaired), errors.Is(err, share.ErrWrongCode), errors.Is(err, share.ErrChangedCertificate):
+	case errors.Is(err, share.ErrNotPaired), errors.Is(err, share.ErrWrongCode), errors.Is(err, share.ErrChangedCertificate),
+		errors.Is(err, share.ErrChangedFile), errors.Is(err, share.ErrStalled):
 		return err.Error()
 	case errors.Is(err, context.DeadlineExceeded), errors.As(err, &netErr) && netErr.Timeout():
 		return "连接超时：对方可能已休眠或离开了这个网络"
