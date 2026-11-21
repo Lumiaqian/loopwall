@@ -32,7 +32,7 @@ func TestContracts(t *testing.T) {
 		if e := AtomicJSON(path, c); e != nil {
 			t.Fatal(e)
 		}
-		r := Runtime{SchemaVersion: 1, AppliedRevision: 7, ActiveDisplayKeys: []string{}, OpenVideoIDs: []string{}, Errors: []string{}, Displays: []DisplayProgress{{DisplayKey: "display-A", VideoID: c.Media[1].ID, PositionSeconds: 61.5, ItemElapsedSeconds: 61.5}}}
+		r := Runtime{SchemaVersion: 1, AppliedRevision: 7, ActiveDisplayKeys: []string{}, OpenVideoIDs: []string{}, Errors: []string{}, Displays: []DisplayProgress{{DisplayKey: "display-A", VideoID: c.Media[1].ID, PositionSeconds: 61.5, ItemElapsedSeconds: 61.5, LastSeenUnix: 1_700_000_000}}}
 		if e := AtomicJSON(filepath.Join(filepath.Dir(path), "go-runtime.json"), r); e != nil {
 			t.Fatal(e)
 		}
@@ -59,7 +59,7 @@ func TestContracts(t *testing.T) {
 		if e != nil {
 			t.Fatal(e)
 		}
-		if len(r.Displays) != 1 || r.Displays[0].DisplayKey != "display-B" || r.Displays[0].PositionSeconds != 61.5 {
+		if len(r.Displays) != 1 || r.Displays[0].DisplayKey != "display-B" || r.Displays[0].PositionSeconds != 61.5 || r.Displays[0].LastSeenUnix != 1_700_000_123 {
 			t.Fatal("Swift progress changed", r)
 		}
 	}

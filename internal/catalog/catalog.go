@@ -51,6 +51,9 @@ type DisplayProgress struct {
 	VideoID            string  `json:"videoID"`
 	PositionSeconds    float64 `json:"positionSeconds"`
 	ItemElapsedSeconds float64 `json:"itemElapsedSeconds"`
+	// LastSeenUnix is when the display last presented; the extension drops sessions
+	// unseen for 30 days. Absent in files written before it existed.
+	LastSeenUnix float64 `json:"lastSeenUnix,omitempty"`
 }
 type Runtime struct {
 	SchemaVersion     int               `json:"schemaVersion"`
