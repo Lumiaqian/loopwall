@@ -188,30 +188,11 @@ final class WallpaperXPCHandler: NSObject, WallpaperExtensionXPCProtocol {
         }
 
         // ---- CREATE: first acquire for this surface ----
-        var contextOptions: [String: Any] = [:]
-        if let did = displayID {
-            contextOptions["displayId"] = did
-        }
-        let caContextRaw: Any? = contextOptions.isEmpty
-            ? CAContext.remoteContext()
-            : CAContext.perform(NSSelectorFromString("remoteContextWithOptions:"), with: contextOptions)?.takeUnretainedValue()
-        guard let caContext = caContextRaw as? CAContext, caContext.contextId != 0 else {
-            extensionLog("  ERROR: remote CAContext creation failed — failing acquire")
-            reply(nil, NSError(domain: "LoopwallExtension", code: 4, userInfo: [NSLocalizedDescriptionKey: "Failed to create remote CAContext"]))
+        guard let (caContext, rootLayer) = makeRootContext(displayID: displayID, destSize: destSize, scaleFactor: scaleFactor, cachedStill: cachedStill, reply: reply) else {
             return
         }
         let contextId = caContext.contextId
-
         let layerFrame = CGRect(origin: .zero, size: destSize)
-        let rootLayer = CALayer()
-        rootLayer.frame = layerFrame
-        rootLayer.contentsScale = scaleFactor
-        rootLayer.contentsGravity = .resizeAspectFill
-        if let cachedStill {
-            rootLayer.contents = cachedStill
-        }
-        caContext.layer = rootLayer
-        CATransaction.flush()
 
         guard let replyObj = createRemoteContextXPC(contextId: contextId) else {
             reply(nil, NSError(domain: "LoopwallExtension", code: 3, userInfo: nil)); return
@@ -234,19 +215,7 @@ final class WallpaperXPCHandler: NSObject, WallpaperExtensionXPCProtocol {
 
         guard let videoURL else {
             // No video file: solid gradient fallback. Static, so it's ready at once.
-            let gradientLayer = CAGradientLayer()
-            gradientLayer.colors = [
-                CGColor(red: 0.2, green: 0.0, blue: 0.5, alpha: 1.0),
-                CGColor(red: 0.0, green: 0.3, blue: 0.7, alpha: 1.0),
-                CGColor(red: 0.0, green: 0.6, blue: 0.4, alpha: 1.0),
-            ]
-            gradientLayer.startPoint = CGPoint(x: 0, y: 0)
-            gradientLayer.endPoint = CGPoint(x: 1, y: 1)
-            gradientLayer.frame = layerFrame
-            gradientLayer.contentsScale = scaleFactor
-            CATransaction.begin(); CATransaction.setDisableActions(true)
-            rootLayer.addSublayer(gradientLayer)
-            CATransaction.commit(); CATransaction.flush()
+            addGradientFallback(to: rootLayer, frame: layerFrame, scaleFactor: scaleFactor)
             reply(replyObj, nil)
             extensionLog("  No video file found — solid color fallback")
             return
@@ -267,8 +236,90 @@ final class WallpaperXPCHandler: NSObject, WallpaperExtensionXPCProtocol {
         // the desktop CALayerHost has never hosted anything of ours.
         let coldStart = !registry.hasLiveRenderer(onDisplay: displayID0, isPreview: isPreview)
 
+        let creation = RendererCreation(
+            key: key, rootLayer: rootLayer, replyObj: replyObj, videoURL: videoURL, cachedStill: cachedStill,
+            position: position, choiceConfiguration: choiceConfiguration, renderChoice: renderChoice, coldStart: coldStart,
+        )
+        startRenderer(creation, reply: reply)
+        let w = Int(destSize.width * scaleFactor), h = Int(destSize.height * scaleFactor)
+        Task { await writeBMPSnapshot(videoURL: videoURL, videoID: renderChoice, displayPixelWidth: w, displayPixelHeight: h) }
+    }
+
+    /// CREATE step 1: the remote CAContext and its root layer (seeded with the cached still).
+    /// Replies with an error and returns nil if the context can't be made.
+    private func makeRootContext(
+        displayID: UInt32?,
+        destSize: CGSize,
+        scaleFactor: CGFloat,
+        cachedStill: CGImage?,
+        reply: @escaping @Sendable (Any?, (any Error)?) -> Void,
+    ) -> (CAContext, CALayer)? {
+        var contextOptions: [String: Any] = [:]
+        if let did = displayID {
+            contextOptions["displayId"] = did
+        }
+        let caContextRaw: Any? = contextOptions.isEmpty
+            ? CAContext.remoteContext()
+            : CAContext.perform(NSSelectorFromString("remoteContextWithOptions:"), with: contextOptions)?.takeUnretainedValue()
+        guard let caContext = caContextRaw as? CAContext, caContext.contextId != 0 else {
+            extensionLog("  ERROR: remote CAContext creation failed — failing acquire")
+            reply(nil, NSError(domain: "LoopwallExtension", code: 4, userInfo: [NSLocalizedDescriptionKey: "Failed to create remote CAContext"]))
+            return nil
+        }
+        let layerFrame = CGRect(origin: .zero, size: destSize)
+        let rootLayer = CALayer()
+        rootLayer.frame = layerFrame
+        rootLayer.contentsScale = scaleFactor
+        rootLayer.contentsGravity = .resizeAspectFill
+        if let cachedStill {
+            rootLayer.contents = cachedStill
+        }
+        caContext.layer = rootLayer
+        CATransaction.flush()
+        return (caContext, rootLayer)
+    }
+
+    /// CREATE fallback: no video file, so show a static solid gradient.
+    private func addGradientFallback(to rootLayer: CALayer, frame: CGRect, scaleFactor: CGFloat) {
+        let gradientLayer = CAGradientLayer()
+        gradientLayer.colors = [
+            CGColor(red: 0.2, green: 0.0, blue: 0.5, alpha: 1.0),
+            CGColor(red: 0.0, green: 0.3, blue: 0.7, alpha: 1.0),
+            CGColor(red: 0.0, green: 0.6, blue: 0.4, alpha: 1.0),
+        ]
+        gradientLayer.startPoint = CGPoint(x: 0, y: 0)
+        gradientLayer.endPoint = CGPoint(x: 1, y: 1)
+        gradientLayer.frame = frame
+        gradientLayer.contentsScale = scaleFactor
+        CATransaction.begin(); CATransaction.setDisableActions(true)
+        rootLayer.addSublayer(gradientLayer)
+        CATransaction.commit(); CATransaction.flush()
+    }
+
+    /// Everything the CREATE path's renderer task needs, gathered once `acquireBody` has
+    /// installed the surface.
+    private struct RendererCreation {
+        let key: SurfaceKey
+        let rootLayer: CALayer
+        let replyObj: AnyObject
+        let videoURL: URL
+        let cachedStill: CGImage?
+        let position: Double
+        let choiceConfiguration: String
+        let renderChoice: String?
+        let coldStart: Bool
+    }
+
+    /// CREATE step 3: build the VideoRenderer off the queue and reply exactly once: after the
+    /// still is seeded on a cold start, after the first frame on a switch, or immediately on
+    /// failure or when another create is already in flight.
+    private func startRenderer(_ creation: RendererCreation, reply: @escaping @Sendable (Any?, (any Error)?) -> Void) {
+        let key = creation.key, rootLayer = creation.rootLayer, replyObj = creation.replyObj
+        let videoURL = creation.videoURL, cachedStill = creation.cachedStill, position = creation.position
+        let choiceConfiguration = creation.choiceConfiguration, renderChoice = creation.renderChoice
+        let coldStart = creation.coldStart
         // Claim this surface's single create slot; a racing acquire that lost skips.
-        if registry.claimRendererCreate(for: key) {
+        if SurfaceRegistry.shared.claimRendererCreate(for: key) {
             traceLog("  Setting up VideoRenderer with: \(videoURL.lastPathComponent) (coldStart=\(coldStart))")
             let boxedRoot = SendableBox(value: rootLayer)
             let boxedReply = SendableBox(value: replyObj)
@@ -308,8 +359,6 @@ final class WallpaperXPCHandler: NSObject, WallpaperExtensionXPCProtocol {
             traceLog("  [acquire] renderer create already in flight for \(key) — skipping duplicate (create path)")
             reply(replyObj, nil)
         }
-        let w = Int(destSize.width * scaleFactor), h = Int(destSize.height * scaleFactor)
-        Task { await writeBMPSnapshot(videoURL: videoURL, videoID: renderChoice, displayPixelWidth: w, displayPixelHeight: h) }
     }
 
     private func reuseSurface(
