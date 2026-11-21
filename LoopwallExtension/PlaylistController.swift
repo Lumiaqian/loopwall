@@ -21,9 +21,12 @@ final class PlaylistController: @unchecked Sendable {
     /// Set by a display reconfiguration; `refreshDisplays` clears it.
     private var displaysDirty = true
     private var lastDisplayRefresh = Date.distantPast
+    /// The power notifications may not reach this process; re-read power every few seconds too.
+    private var lastPowerPoll = Date.distantPast
     private var activeKeys = Set<String>()
     private var lastOpenIDs = Set<String>()
     private var errors: [String] = []
+    private var powerSavingActive = false
     private let awake = LockDisplayAssertion()
 
     private init() {
@@ -107,6 +110,7 @@ final class PlaylistController: @unchecked Sendable {
         let signature = "\(config.playlist.advanceMode):\(config.playlist.intervalSeconds)"
         let ruleChanged = persistedRule.map { $0 != signature } ?? (old.playlist.advanceMode != config.playlist.advanceMode || old.playlist.intervalSeconds != config.playlist.intervalSeconds)
         persistedRule = signature
+        PlaybackStore.post(.powerSavingSettingChanged(config.playlist.powerSaving ?? false))
         // Each display against its own items, so a pinned one keeps its place.
         for key in sessions.keys {
             PlaylistTimeline.reconcile(&sessions[key]!, oldOrder: old.playlist.videoIDs, items: items(for: key), resetElapsed: ruleChanged)
@@ -154,6 +158,10 @@ final class PlaylistController: @unchecked Sendable {
         }
         if PlaylistCadence.displayRefreshDue(dirty: displaysDirty, lastRefresh: lastDisplayRefresh, now: Date()) {
             refreshDisplays()
+        }
+        if Date().timeIntervalSince(lastPowerPoll) >= 5 {
+            lastPowerPoll = Date()
+            PowerMonitor.refresh() // posts only when the conditions changed
         }
         let state = PlaybackStore.snapshot
         let registry = SurfaceRegistry.shared
@@ -246,6 +254,7 @@ final class PlaylistController: @unchecked Sendable {
         }
         applied = applied.filter { seenRenderers.contains($0.key) }
         activeKeys = active; lastOpenIDs = open
+        powerSavingActive = state.pausedForPower
         adaptTickRate(presenting: !active.isEmpty, displaysAsleep: state.displaysAsleep)
         awake.update(
             enabled: config.playlist.keepAwakeWhenLockedOnAC,
@@ -304,6 +313,7 @@ final class PlaylistController: @unchecked Sendable {
             videoIDs: sessions.mapValues(\.videoID),
             errors: runtimeErrors(),
             keepAwakeActive: awake.isActive,
+            powerSavingActive: powerSavingActive,
         )
     }
 
@@ -318,6 +328,7 @@ final class PlaylistController: @unchecked Sendable {
             activeDisplayKeys: structure.activeDisplayKeys,
             openVideoIDs: structure.openVideoIDs,
             keepAwakeActive: structure.keepAwakeActive,
+            powerSavingActive: structure.powerSavingActive ? true : nil,
             errors: structure.errors,
         )
         do {
