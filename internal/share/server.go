@@ -41,6 +41,13 @@ type Item struct {
 // code is six digits and whose peer is not told from another.
 const pairVersion = 2
 
+// errHeader names, on a refusal, why, where the status alone cannot:
+// versions before 2 know a 403 as a wrong code and nothing else.
+const (
+	errHeader       = "X-Loopwall-Error"
+	errLegacyDenied = "legacy-disabled"
+)
+
 type pairRequest struct {
 	// Version is pairVersion for a request that presents a client
 	// certificate: the one whose fingerprint Back names.
@@ -88,11 +95,12 @@ type Server struct {
 	// failDelay slows each wrong code down.
 	failDelay time.Duration
 
-	mu       sync.Mutex
-	code     string
-	failures int
-	srv      *http.Server
-	port     int
+	mu          sync.Mutex
+	code        string
+	failures    int
+	allowLegacy bool
+	srv         *http.Server
+	port        int
 }
 
 // NewServer makes a server sharing the library at root.
@@ -174,6 +182,22 @@ func (s *Server) Start(addr string) (int, error) {
 	return s.Port(), nil
 }
 
+// SetLegacy turns on or off accepting pairing requests of versions before
+// 2, which carry six digits and no certificate, and so cannot tell this
+// Mac from one that impersonates it. Off at first.
+func (s *Server) SetLegacy(on bool) {
+	s.mu.Lock()
+	s.allowLegacy = on
+	s.mu.Unlock()
+}
+
+// Legacy reports whether SetLegacy is on.
+func (s *Server) Legacy() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.allowLegacy
+}
+
 // Port is the port the server listens on, 0 when stopped.
 func (s *Server) Port() int {
 	s.mu.Lock()
@@ -233,6 +257,15 @@ func (s *Server) pair(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		bound = fp
+	case !s.Legacy() || s.verifiedDevice(req.Device):
+		// Refused as what it is, not as a guess: the secret is not
+		// looked at, so this is no way to try one. A device paired by the
+		// long code is never re-paired the legacy way, which would replace
+		// its bound grant and pinned certificate on the strength of six
+		// digits.
+		w.Header().Set(errHeader, errLegacyDenied)
+		http.Error(w, "legacy pairing is off", http.StatusForbidden)
+		return
 	}
 	s.mu.Lock()
 	ok := s.code != "" && subtle.ConstantTimeCompare([]byte(req.Code), []byte(s.code)) == 1
@@ -259,7 +292,7 @@ func (s *Server) pair(w http.ResponseWriter, r *http.Request) {
 	// The code proved the device is the user's: what it grants in return,
 	// sent over the same connection, pairs this Mac with it too.
 	if b := req.Back; b != nil && hex64(b.Token) && hex64(b.Fingerprint) {
-		if err := s.store.Pair(req.Device, Paired{Name: name, Token: b.Token, Fingerprint: b.Fingerprint}); err != nil {
+		if err := s.store.Pair(req.Device, Paired{Name: name, Token: b.Token, Fingerprint: b.Fingerprint, Verified: bound != ""}); err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
@@ -357,4 +390,14 @@ func (s *Server) media(path func(string, catalog.MediaEntry) string) http.Handle
 func writeJSON(w http.ResponseWriter, v any) {
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(v)
+}
+
+// verifiedDevice reports whether device was paired by the long code, either
+// way: its grant is bound to its certificate, or its pin is verified.
+func (s *Server) verifiedDevice(device string) bool {
+	if g, ok := s.store.granted(device); ok && g.ClientFingerprint != "" {
+		return true
+	}
+	p, ok := s.store.Paired(device)
+	return ok && p.Verified
 }

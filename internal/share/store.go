@@ -41,6 +41,11 @@ type Paired struct {
 	Name        string `json:"name"`
 	Token       string `json:"token"`
 	Fingerprint string `json:"fingerprint"` // SHA-256 of its certificate, hex
+	// Verified is a pairing made with a long code, which named the
+	// peer's certificate before anything was sent. One made with six
+	// digits, or kept from before there were long codes, pinned whatever
+	// answered: it is legacy, and the peer may be an impostor.
+	Verified bool `json:"verified,omitempty"`
 }
 
 // state is share.json: this Mac's identity, the devices granted its
