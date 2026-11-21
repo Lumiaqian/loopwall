@@ -121,11 +121,15 @@ func (s *Server) Start(addr string) (int, error) {
 	if err != nil {
 		return 0, err
 	}
+	ln = localOnly(ln)
 	srv := &http.Server{
 		Handler:           s.Handler(),
 		TLSConfig:         &tls.Config{Certificates: []tls.Certificate{cert}, MinVersion: tls.VersionTLS13},
 		ReadHeaderTimeout: 10 * time.Second,
-		IdleTimeout:       time.Minute,
+		// Requests are small: a slow connection cannot hold a slot.
+		ReadTimeout:    30 * time.Second,
+		MaxHeaderBytes: 16 << 10,
+		IdleTimeout:    time.Minute,
 		// Bonjour's resolving connects and hangs up: no handshake to log.
 		ErrorLog: log.New(io.Discard, "", 0),
 	}
