@@ -236,9 +236,10 @@ func TestReapAcceptsHeartbeatAgedRuntime(t *testing.T) {
 	removed := c.Media[0]
 	c.RemovedMediaIDs = append(c.RemovedMediaIDs, removed.ID)
 	c.Media, c.Playlist.VideoIDs = c.Media[1:], c.Playlist.VideoIDs[1:]
-	Save(root, &c)
+	// The copy exists before the deletion is saved, as in the app.
 	dir := filepath.Dir(VideoPath(root, removed))
 	os.MkdirAll(dir, 0700)
+	Save(root, &c)
 	age := func(d time.Duration) {
 		r := Runtime{SchemaVersion: 1, AppliedRevision: c.Revision, UpdatedAtUnix: float64(time.Now().Add(-d).Unix())}
 		AtomicJSON(filepath.Join(root, "runtime.json"), r)
@@ -252,5 +253,30 @@ func TestReapAcceptsHeartbeatAgedRuntime(t *testing.T) {
 	Reap(root)
 	if _, e := os.Stat(dir); !os.IsNotExist(e) {
 		t.Fatal("a heartbeat-aged report did not authorize deletion")
+	}
+}
+
+// TestSaveDropsReapedRemovals checks that a deleted ID leaves
+// RemovedMediaIDs once its directory is gone, and stays while it is not.
+func TestSaveDropsReapedRemovals(t *testing.T) {
+	root := t.TempDir()
+	const gone, pending = "11111111-1111-4111-8111-111111111111", "22222222-2222-4222-8222-222222222222"
+	if e := os.MkdirAll(filepath.Join(root, "videos", pending), 0o700); e != nil {
+		t.Fatal(e)
+	}
+	c := Default()
+	c.RemovedMediaIDs = []string{gone, pending}
+	if e := Save(root, &c); e != nil {
+		t.Fatal(e)
+	}
+	if len(c.RemovedMediaIDs) != 1 || c.RemovedMediaIDs[0] != pending {
+		t.Fatalf("in memory: %v", c.RemovedMediaIDs)
+	}
+	loaded, e := Load(root)
+	if e != nil {
+		t.Fatal(e)
+	}
+	if len(loaded.RemovedMediaIDs) != 1 || loaded.RemovedMediaIDs[0] != pending {
+		t.Fatalf("on disk: %v", loaded.RemovedMediaIDs)
 	}
 }

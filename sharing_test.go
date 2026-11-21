@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"strings"
@@ -95,5 +96,31 @@ func TestMergePeers(t *testing.T) {
 	}
 	if _, ok := seen["b"]; ok {
 		t.Error("b's time stays remembered")
+	}
+}
+
+func TestPullOutcome(t *testing.T) {
+	boom := errors.New("boom")
+	for _, c := range []struct {
+		name        string
+		err, ctxErr error
+		want        pullState
+	}{
+		{"done", nil, nil, pullDone},
+		{"done as the cancel arrives", nil, context.Canceled, pullDone},
+		{"cancelled", context.Canceled, context.Canceled, pullCancelled},
+		{"cancel surfacing as another error", io.ErrUnexpectedEOF, context.Canceled, pullCancelled},
+		{"failed", boom, nil, pullFailed},
+		{"timed out is a failure, not a cancel", context.DeadlineExceeded, context.DeadlineExceeded, pullFailed},
+		{"stalled", share.ErrStalled, nil, pullFailed},
+	} {
+		if got := pullOutcome(c.err, c.ctxErr); got != c.want {
+			t.Errorf("%s: %v, want %v", c.name, got, c.want)
+		}
+	}
+	for _, err := range []error{share.ErrChangedFile, share.ErrStalled} {
+		if got := friendly(err); !strings.Contains(got, err.Error()) {
+			t.Errorf("friendly(%v) = %q", err, got)
+		}
 	}
 }

@@ -24,6 +24,12 @@ var (
 	// ErrChangedCertificate is a peer presenting another certificate than
 	// it paired with: another Mac in its place, or its sharing reset.
 	ErrChangedCertificate = errors.New("对方的身份变了，请重新配对")
+	// ErrChangedFile is a video that is not the size its library listed:
+	// the peer changed it since.
+	ErrChangedFile = errors.New("对方的文件已变化，请刷新后重试")
+	// ErrStalled is a download that received nothing for too long: the peer
+	// may have gone to sleep.
+	ErrStalled = errors.New("对方长时间没有发来数据，下载已中断")
 )
 
 // Peer is a Mac sharing its library, as Bonjour found it.
@@ -141,23 +147,65 @@ func (c *Client) Thumbnail(ctx context.Context, peer Peer, id string) ([]byte, e
 	return io.ReadAll(io.LimitReader(resp.Body, 8<<20))
 }
 
+// downloadIdle is how long a download waits for the next bytes before it
+// gives up; tests shorten it.
+var downloadIdle = 60 * time.Second
+
 // Download writes peer's video id to w, reporting how much of it came, of
-// how much, as it does. It fails unless all of it came.
-func (c *Client) Download(ctx context.Context, peer Peer, id string, w io.Writer, progress func(done, total int64)) error {
+// how much, as it does. size is what the library listed: it fails unless
+// exactly that came, so a file that changed since, or a peer sending more
+// than it said, does not fill the disk. It also fails when no bytes arrive
+// for downloadIdle.
+func (c *Client) Download(ctx context.Context, peer Peer, id string, size int64, w io.Writer, progress func(done, total int64)) error {
+	ctx, cancel := context.WithCancelCause(ctx)
+	defer cancel(nil)
+	idle := time.AfterFunc(downloadIdle, func() { cancel(ErrStalled) })
+	defer idle.Stop()
+	// A stall surfaces as the context's cancellation: say what it was.
+	stalled := func(err error) error {
+		if errors.Is(context.Cause(ctx), ErrStalled) {
+			return ErrStalled
+		}
+		return err
+	}
+
 	resp, err := c.get(ctx, peer, "/v1/video/"+id, 0)
 	if err != nil {
-		return err
+		return stalled(err)
 	}
 	defer resp.Body.Close()
-	total := resp.ContentLength
-	n, err := io.Copy(w, &counter{r: resp.Body, total: total, progress: progress})
-	if err != nil {
-		return err
+	if resp.ContentLength >= 0 && resp.ContentLength != size {
+		return ErrChangedFile
 	}
-	if total >= 0 && n != total {
-		return fmt.Errorf("下载不完整（%d / %d 字节）：%w", n, total, io.ErrUnexpectedEOF)
+	body := &idleReader{r: resp.Body, timer: idle}
+	n, err := io.Copy(w, &counter{r: io.LimitReader(body, size), total: size, progress: progress})
+	if err != nil {
+		return stalled(err)
+	}
+	if n < size {
+		return fmt.Errorf("下载不完整（%d / %d 字节）：%w", n, size, io.ErrUnexpectedEOF)
+	}
+	// What is left past size, a peer sending more than it said, is not
+	// written: any byte at all is a changed file.
+	var extra [1]byte
+	if m, _ := body.Read(extra[:]); m > 0 {
+		return ErrChangedFile
 	}
 	return nil
+}
+
+// idleReader restarts timer whenever bytes arrive.
+type idleReader struct {
+	r     io.Reader
+	timer *time.Timer
+}
+
+func (r *idleReader) Read(p []byte) (int, error) {
+	n, err := r.r.Read(p)
+	if n > 0 {
+		r.timer.Reset(downloadIdle)
+	}
+	return n, err
 }
 
 // get makes an authorized request of peer, over its pinned certificate.
