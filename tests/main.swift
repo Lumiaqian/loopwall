@@ -257,3 +257,11 @@ presentFiles.insert(tickB.id)
 require(mediaIndex.refresh(now: indexStart.addingTimeInterval(20), urlFor: statURL) && mediaIndex.url(for: tickB.id) != nil, "refresh notices a file that appears")
 require(!mediaIndex.refresh(now: indexStart.addingTimeInterval(30), urlFor: statURL), "an unchanged refresh reports no change")
 print("PASS: media index")
+
+/// Display list refresh: by event, with a slow safety net.
+let refreshedAt = Date(timeIntervalSince1970: 5_000)
+require(!PlaylistCadence.displayRefreshDue(dirty: false, lastRefresh: refreshedAt, now: refreshedAt.addingTimeInterval(0.1)), "a clean display list is not re-read every tick")
+require(!PlaylistCadence.displayRefreshDue(dirty: false, lastRefresh: refreshedAt, now: refreshedAt.addingTimeInterval(4.9)), "a clean display list waits for the safety interval")
+require(PlaylistCadence.displayRefreshDue(dirty: true, lastRefresh: refreshedAt, now: refreshedAt.addingTimeInterval(0.1)), "a reconfiguration refreshes at once")
+require(PlaylistCadence.displayRefreshDue(dirty: false, lastRefresh: refreshedAt, now: refreshedAt.addingTimeInterval(5)), "the safety interval refreshes a clean list")
+print("PASS: display refresh cadence")
