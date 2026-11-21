@@ -14,13 +14,26 @@
 // bricking the wallpaper.
 
 import Foundation
+import os
 import Security
 
 enum CallerValidation {
+    /// Connections accepted only because the peer's identity could not be obtained.
+    /// The policy stays fail-open; the count is surfaced in runtime.json so a silently
+    /// broken check (an OS change to the audit-token SPI) shows up in the app.
+    private static let unverified = OSAllocatedUnfairLock(initialState: 0)
+    static var unverifiedCount: Int {
+        unverified.withLock { $0 }
+    }
+    private static func acceptUnverified() -> Bool {
+        unverified.withLock { $0 += 1 }
+        return true
+    }
+
     static func isAcceptable(_ connection: NSXPCConnection) -> Bool {
         guard connection.responds(to: NSSelectorFromString("auditToken")) else {
             extensionLog("  [Caller] auditToken SPI unavailable — accepting (fail-open)")
-            return true
+            return acceptUnverified()
         }
 
         var token = connection.auditToken
@@ -31,12 +44,12 @@ enum CallerValidation {
         let status = SecCodeCopyGuestWithAttributes(nil, attrs, [], &code)
         guard status == errSecSuccess, let code else {
             extensionLog("  [Caller] Could not derive peer SecCode (status \(status)) — accepting (fail-open)")
-            return true
+            return acceptUnverified()
         }
 
         guard let appleReq = requirement("anchor apple") else {
             extensionLog("  [Caller] Could not build anchor-apple requirement — accepting (fail-open)")
-            return true
+            return acceptUnverified()
         }
 
         let appleStatus = SecCodeCheckValidity(code, SecCSFlags(rawValue: 0), appleReq)

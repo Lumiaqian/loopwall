@@ -323,3 +323,8 @@ let legacyJSON = Data(#"{"displayKey":"d","videoID":"v","positionSeconds":1,"ite
 let legacyDecoded = try JSONDecoder().decode(DisplayProgress.self, from: legacyJSON)
 require(legacyDecoded.lastSeenUnix == nil, "files without lastSeenUnix still decode")
 print("PASS: session pruning")
+
+// Fail-open visibility: no line until a connection was accepted unverified.
+require(PlaylistCadence.unverifiedCallerError(count: 0) == nil, "no line while every caller was verified")
+require(PlaylistCadence.unverifiedCallerError(count: 3) == "有 3 次连接无法验证来源，已放行（系统接口变化？）", "unverified acceptances are reported with their count")
+print("PASS: unverified caller report")
