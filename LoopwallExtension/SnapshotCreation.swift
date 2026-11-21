@@ -6,10 +6,15 @@ import CoreMedia
 ///
 /// The caller supplies the surface's actual asset and clock; displays never borrow
 /// one another's snapshot. Loop offsets are normalized back into the video.
-func createSnapshotViaRuntime(videoURL: URL, currentTime: CMTime? = nil) async -> AnyObject? {
+///
+/// `displayPixels`, when known, caps the frame at what the display needs.
+func createSnapshotViaRuntime(videoURL: URL, currentTime: CMTime? = nil, displayPixels: CGSize? = nil) async -> AnyObject? {
     let asset = AVURLAsset(url: videoURL)
     let generator = AVAssetImageGenerator(asset: asset)
     generator.appliesPreferredTrackTransform = true
+    if let displayPixels, let size = await snapshotMaximumSize(for: asset, displayPixels: displayPixels) {
+        generator.maximumSize = size
+    }
     let duration = await (try? asset.load(.duration).seconds) ?? 0
     let seconds = currentTime?.seconds ?? 0
     let position = duration > 0 && seconds.isFinite ? max(0, seconds).truncatingRemainder(dividingBy: duration) : 0
@@ -30,6 +35,15 @@ func createSnapshotViaRuntime(videoURL: URL, currentTime: CMTime? = nil) async -
 
     traceLog("  [Snapshot] Created WallpaperSnapshotXPC \(image.width)x\(image.height)")
     return snapshotXPC
+}
+
+/// The `maximumSize` that covers `displayPixels` for this asset's displayed video size,
+/// or nil when the video has no readable size.
+func snapshotMaximumSize(for asset: AVURLAsset, displayPixels: CGSize) async -> CGSize? {
+    guard let track = try? await asset.loadTracks(withMediaType: .video).first,
+          let (natural, transform) = try? await track.load(.naturalSize, .preferredTransform)
+    else { return nil }
+    return SnapshotSizing.maximumSize(videoSize: natural.applying(transform), displayPixels: displayPixels)
 }
 
 /// Render a CGImage to an IOSurface and wrap it in a WallpaperSnapshotXPC.
