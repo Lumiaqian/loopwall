@@ -16,6 +16,9 @@ final class PlaylistController: @unchecked Sendable {
     private var applied: [Int: String] = [:]
     private var timer: (any DispatchSourceTimer)?
     private var lastSave = Date.distantPast
+    /// Set by a display reconfiguration; `refreshDisplays` clears it.
+    private var displaysDirty = true
+    private var lastDisplayRefresh = Date.distantPast
     private var activeKeys = Set<String>()
     private var lastOpenIDs = Set<String>()
     private var errors: [String] = []
@@ -61,6 +64,10 @@ final class PlaylistController: @unchecked Sendable {
     func reload() {
         queue.async { [self] in reloadOnQueue(); tick(); save() }
     }
+    /// A display was added, removed or reconfigured: re-read the display list on the next tick.
+    func displaysChanged() {
+        queue.async { [self] in displaysDirty = true }
+    }
     func lifecycleChanged() {
         queue.async { [self] in tick(); save() }
     }
@@ -82,7 +89,9 @@ final class PlaylistController: @unchecked Sendable {
         queue.sync {
             let playable = items
             guard !preview else { return playable.first.map { DisplayProgress(displayKey: "preview", videoID: $0.id) } }
-            refreshDisplays()
+            if displayKeys[displayID] == nil {
+                refreshDisplays()
+            }
             guard let key = displayKeys[displayID] else { return nil }
             ensureSession(key: key, items: items(for: key))
             return sessions[key]
@@ -108,6 +117,8 @@ final class PlaylistController: @unchecked Sendable {
         }
     }
     private func refreshDisplays() {
+        displaysDirty = false
+        lastDisplayRefresh = Date()
         var count: UInt32 = 0
         CGGetActiveDisplayList(0, nil, &count)
         var ids = [CGDirectDisplayID](repeating: 0, count: Int(count))
@@ -139,7 +150,9 @@ final class PlaylistController: @unchecked Sendable {
         if index.isStale(now: Date()) {
             refreshIndex()
         }
-        refreshDisplays()
+        if PlaylistCadence.displayRefreshDue(dirty: displaysDirty, lastRefresh: lastDisplayRefresh, now: Date()) {
+            refreshDisplays()
+        }
         let state = PlaybackStore.snapshot
         let registry = SurfaceRegistry.shared
         let playlist = items
