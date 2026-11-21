@@ -63,3 +63,5 @@ Go 通过同目录临时文件、同步并原子 rename 发布配置；扩展通
 ## 系统边界
 
 墙纸接入使用上游已验证的私有 WallpaperExtensionKit 接口。当前本机 ad-hoc 签名可以注册、加载并读写独立容器；这一结果只代表已实测的 macOS 版本和本机环境，不是 Developer ID 公证发行验证。公开发行不在首版范围。
+
+上游 Phosphene 的同步基线与已移植、未移植的修复记录在 [上游同步基线](upstream/SYNC.md)。
