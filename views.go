@@ -336,22 +336,24 @@ func (a *application) commitRename(id string) {
 	if a.busy || name == "" {
 		return
 	}
-	for i := range a.config.Media {
-		if a.config.Media[i].ID == id {
-			a.config.Media[i].Name = name
-		}
-	}
 	a.selected = ""
-	a.save()
+	a.commit(func(c *catalog.Config) {
+		for i := range c.Media {
+			if c.Media[i].ID == id {
+				c.Media[i].Name = name
+			}
+		}
+	})
 }
 
 func (a *application) togglePlaylist(id string) {
-	if slices.Contains(a.config.Playlist.VideoIDs, id) {
-		a.config.Playlist.VideoIDs = slices.DeleteFunc(a.config.Playlist.VideoIDs, func(v string) bool { return v == id })
-	} else {
-		a.config.Playlist.VideoIDs = append(a.config.Playlist.VideoIDs, id)
-	}
-	a.save()
+	a.commit(func(c *catalog.Config) {
+		if slices.Contains(c.Playlist.VideoIDs, id) {
+			c.Playlist.VideoIDs = slices.DeleteFunc(c.Playlist.VideoIDs, func(v string) bool { return v == id })
+		} else {
+			c.Playlist.VideoIDs = append(c.Playlist.VideoIDs, id)
+		}
+	})
 }
 
 func (a *application) playlistView(c *ui.Context) {
@@ -392,8 +394,7 @@ func (a *application) playlistView(c *ui.Context) {
 							mode = 1
 						}
 						if glassSegmented(c, &mode, "切换时机", a.busy, "播完一遍", "按时长") {
-							a.config.Playlist.AdvanceMode = []string{"end", "duration"}[mode]
-							a.save()
+							a.commit(func(cfg *catalog.Config) { cfg.Playlist.AdvanceMode = []string{"end", "duration"}[mode] })
 						}
 					})
 					if a.config.Playlist.AdvanceMode == "duration" {
@@ -447,19 +448,16 @@ func (a *application) orderRow(c *ui.Context, i, n int, m catalog.MediaEntry) {
 			ui.Text(c, m.Name).FontWeight(600).SingleLine()
 			ui.Text(c, fmt.Sprintf("%s · %s", clock(m.DurationSeconds), resolution(m.Width, m.Height))).FontSize(11).TextColor(t.TextMuted)
 		})
-		ids := a.config.Playlist.VideoIDs
 		controls := ui.Row(c).Gap(2).Opacity(0.55)
 		if hovered {
 			controls.Opacity(1)
 		}
 		controls.Children(func() {
 			iconButton(c, iconUp, "上移").Disabled(a.busy || i == 0).OnClick(func() {
-				ids[i-1], ids[i] = ids[i], ids[i-1]
-				a.save()
+				a.commit(func(c *catalog.Config) { ids := c.Playlist.VideoIDs; ids[i-1], ids[i] = ids[i], ids[i-1] })
 			})
 			iconButton(c, iconDown, "下移").Disabled(a.busy || i == n-1).OnClick(func() {
-				ids[i+1], ids[i] = ids[i], ids[i+1]
-				a.save()
+				a.commit(func(c *catalog.Config) { ids := c.Playlist.VideoIDs; ids[i+1], ids[i] = ids[i], ids[i+1] })
 			})
 			iconButton(c, iconX, "移出轮播").Disabled(a.busy).OnClick(func() { a.togglePlaylist(m.ID) })
 		})
@@ -527,15 +525,16 @@ func (a *application) pinDisplay(key, id string) {
 	if a.busy || a.config.Playlist.Pins[key] == id {
 		return
 	}
-	if id == "" {
-		delete(a.config.Playlist.Pins, key)
-	} else {
-		if a.config.Playlist.Pins == nil {
-			a.config.Playlist.Pins = map[string]string{}
+	a.commit(func(c *catalog.Config) {
+		if id == "" {
+			delete(c.Playlist.Pins, key)
+			return
 		}
-		a.config.Playlist.Pins[key] = id
-	}
-	a.save()
+		if c.Playlist.Pins == nil {
+			c.Playlist.Pins = map[string]string{}
+		}
+		c.Playlist.Pins[key] = id
+	})
 }
 
 // pinAll makes every display loop video id alone, saving once.
@@ -543,13 +542,14 @@ func (a *application) pinAll(id string) {
 	if a.busy || len(a.displays) == 0 {
 		return
 	}
-	if a.config.Playlist.Pins == nil {
-		a.config.Playlist.Pins = map[string]string{}
-	}
-	for _, d := range a.displays {
-		a.config.Playlist.Pins[d.Identifier] = id
-	}
-	a.save()
+	a.commit(func(c *catalog.Config) {
+		if c.Playlist.Pins == nil {
+			c.Playlist.Pins = map[string]string{}
+		}
+		for _, d := range a.displays {
+			c.Playlist.Pins[d.Identifier] = id
+		}
+	})
 }
 
 // pinnedOn names the displays that loop video id alone.
@@ -569,8 +569,7 @@ func (a *application) applyInterval() {
 		a.status = "请输入正整数秒"
 		return
 	}
-	a.config.Playlist.IntervalSeconds = n
-	a.save()
+	a.commit(func(c *catalog.Config) { c.Playlist.IntervalSeconds = n })
 }
 
 func (a *application) settingsView(c *ui.Context) {
@@ -604,8 +603,9 @@ func (a *application) settingsView(c *ui.Context) {
 				sectionTitle(c, iconSettings, "通用")
 				group(c, func() {
 					groupRow(c, "接电锁屏时保持亮屏", "解锁、拔掉电源或停用本墙纸时自动释放，不改变系统密码要求。", func() {
-						if glassSwitch(c, &a.config.Playlist.KeepAwakeWhenLockedOnAC, "接电锁屏保持亮屏", a.busy) {
-							a.save()
+						keepAwake := a.config.Playlist.KeepAwakeWhenLockedOnAC
+						if glassSwitch(c, &keepAwake, "接电锁屏保持亮屏", a.busy) {
+							a.commit(func(cfg *catalog.Config) { cfg.Playlist.KeepAwakeWhenLockedOnAC = keepAwake })
 						}
 					})
 					ui.Divider(c)
