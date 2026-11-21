@@ -485,6 +485,9 @@ func (a *application) displayCard(c *ui.Context, key, name string, builtIn bool)
 				ui.Box(c).Size(7, 7).Radius(4).Shrink(0).Background(s.color(t))
 				ui.Text(c, s.title()).FontSize(12).SingleLine().Shrink(1)
 			})
+			if s.ok && s.held {
+				ui.Text(c, "省电模式：已暂停，停在当前画面").FontSize(11).TextColor(t.TextMuted)
+			}
 			if s.ok && s.media.DurationSeconds > 0 {
 				ui.Progress(c, math.Min(1, s.position/s.media.DurationSeconds)).Label("播放进度")
 				ui.Text(c, fmt.Sprintf("%s / %s", clock(s.position), clock(s.media.DurationSeconds))).FontSize(11).TextColor(t.TextMuted)
@@ -606,6 +609,13 @@ func (a *application) settingsView(c *ui.Context) {
 						keepAwake := a.config.Playlist.KeepAwakeWhenLockedOnAC
 						if glassSwitch(c, &keepAwake, "接电锁屏保持亮屏", a.busy) {
 							a.commit(func(cfg *catalog.Config) { cfg.Playlist.KeepAwakeWhenLockedOnAC = keepAwake })
+						}
+					})
+					ui.Divider(c)
+					groupRow(c, "省电模式", "用电池、开启低电量模式或机器过热时暂停壁纸，停在当前画面。", func() {
+						powerSaving := a.config.Playlist.PowerSaving
+						if glassSwitch(c, &powerSaving, "省电模式", a.busy) {
+							a.commit(func(cfg *catalog.Config) { cfg.Playlist.PowerSaving = powerSaving })
 						}
 					})
 					ui.Divider(c)
@@ -740,6 +750,7 @@ func (a *application) repairBanner(c *ui.Context) {
 type displayState struct {
 	ok       bool // a fresh report names a video for this display
 	waiting  bool // reported but not shown by the system yet
+	held     bool // paused on purpose by the power-saving setting
 	media    catalog.MediaEntry
 	position float64
 }
@@ -757,7 +768,9 @@ func (a *application) displayState(key string) displayState {
 		if p.DisplayKey == key {
 			s.media, s.ok = a.entry(p.VideoID)
 			s.position = p.PositionSeconds
-			s.waiting = !slices.Contains(a.runtime.ActiveDisplayKeys, key)
+			inactive := !slices.Contains(a.runtime.ActiveDisplayKeys, key)
+			s.held = inactive && a.runtime.PowerSavingActive
+			s.waiting = inactive && !s.held
 		}
 	}
 	return s
@@ -765,6 +778,8 @@ func (a *application) displayState(key string) displayState {
 
 func (s displayState) color(t *ui.Theme) ui.Color {
 	switch {
+	case s.ok && s.held:
+		return t.TextMuted
 	case s.ok && !s.waiting:
 		return t.Success
 	case s.ok:
@@ -784,6 +799,8 @@ func (s displayState) short() string {
 	switch {
 	case s.ok && s.waiting:
 		return "等待系统恢复展示"
+	case s.ok && s.held:
+		return "省电模式已暂停"
 	case s.ok:
 		return s.media.Name
 	}

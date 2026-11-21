@@ -66,6 +66,38 @@ func TestWallpaperRecovery(t *testing.T) {
 	}
 }
 
+// Power saving holds every display on purpose; that is not a stall, but a
+// silent extension under it still is.
+func TestPowerSavingIsNotAStall(t *testing.T) {
+	t0 := time.Unix(1_000_000, 0)
+	at := func(s int) time.Time { return t0.Add(time.Duration(s) * time.Second) }
+	held := func(s int) catalog.Runtime {
+		return catalog.Runtime{UpdatedAtUnix: float64(at(s).Unix()), Displays: []catalog.DisplayProgress{{DisplayKey: "A"}}, PowerSavingActive: true}
+	}
+	a := &application{root: t.TempDir()}
+	for s := 0; s <= 60; s += 5 {
+		a.observeWallpaper(held(s), 0, at(s))
+	}
+	if a.wallpaperStalled(at(60)) {
+		t.Fatal("power saving offered a repair")
+	}
+	// Without the flag the same report is a stall.
+	r := held(60)
+	r.PowerSavingActive = false
+	a.observeWallpaper(r, 0, at(60))
+	a.observeWallpaper(r, 0, at(85))
+	if !a.wallpaperStalled(at(85)) {
+		t.Fatal("no active display without power saving must still be offered a repair")
+	}
+	// Power saving does not hide a silent extension.
+	b := &application{root: t.TempDir()}
+	b.observeWallpaper(held(0), 0, at(40))
+	b.observeWallpaper(held(0), 0, at(70))
+	if !b.wallpaperStalled(at(70)) {
+		t.Fatal("silent extension under power saving not offered a repair")
+	}
+}
+
 func stamp(t *testing.T, root string, at time.Time) {
 	t.Helper()
 	text := strconv.FormatFloat(float64(at.UnixNano())/1e9, 'f', -1, 64)
