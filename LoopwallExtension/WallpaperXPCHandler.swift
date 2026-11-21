@@ -448,7 +448,10 @@ final class WallpaperXPCHandler: NSObject, WallpaperExtensionXPCProtocol {
         let fallback = VideoLibrary.shared.config.playlist.videoIDs.compactMap { VideoLibrary.shared.videoURL(for: $0) }.first
         guard let url = sample?.url ?? fallback else { reply(nil, nil); return }
         let time = sample.map { CMTime(seconds: $0.seconds, preferredTimescale: 60_000) }
-        Task { await reply(createSnapshotViaRuntime(videoURL: url, currentTime: time), nil) }
+        let displayPixels = key.flatMap { registry.surface(for: $0) }.map {
+            CGSize(width: $0.destSize.width * $0.scaleFactor, height: $0.destSize.height * $0.scaleFactor)
+        }
+        Task { await reply(createSnapshotViaRuntime(videoURL: url, currentTime: time, displayPixels: displayPixels), nil) }
     }
 
     // MARK: - Settings
