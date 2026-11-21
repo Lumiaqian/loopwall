@@ -200,3 +200,19 @@ func TestImportFrom(t *testing.T) {
 		t.Errorf("left in videos: %v", entries)
 	}
 }
+
+// A filename is one plain name: the Swift side rejects "." and ".." too.
+func TestValidateRejectsDotFilenames(t *testing.T) {
+	for _, name := range []string{"", ".", "..", "a/b.mp4", `a\b.mp4`, "../x.mp4"} {
+		c := fixture(t)
+		c.Media[0].Filename = name
+		if c.Validate() == nil {
+			t.Errorf("filename %q accepted", name)
+		}
+	}
+	c := fixture(t)
+	c.Media[0].Filename = "a..b.mp4"
+	if err := c.Validate(); err != nil {
+		t.Errorf("a plain name with dots rejected: %v", err)
+	}
+}

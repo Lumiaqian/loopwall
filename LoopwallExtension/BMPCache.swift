@@ -94,6 +94,10 @@ func writeBMPSnapshot(videoURL: URL, videoID: String? = nil, displayPixelWidth: 
     let asset = AVURLAsset(url: videoURL)
     let generator = AVAssetImageGenerator(asset: asset)
     generator.appliesPreferredTrackTransform = true
+    let displayPixels = CGSize(width: displayPixelWidth, height: displayPixelHeight)
+    if let size = await snapshotMaximumSize(for: asset, displayPixels: displayPixels) {
+        generator.maximumSize = size
+    }
 
     let cgImage: CGImage
     do {

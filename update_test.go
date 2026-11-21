@@ -9,6 +9,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/Lumiaqian/loopwall/internal/catalog"
 )
 
 // TestLaunchedVersion checks that only a launch as a version other than
@@ -41,7 +43,7 @@ func TestLaunchedVersion(t *testing.T) {
 }
 
 // TestReloadExtension checks that the extension is registered after an
-// update only when PlugInKit lost it.
+// update unless PlugInKit has it at the path the app runs it from.
 func TestReloadExtension(t *testing.T) {
 	var calls []string
 	listed := ""
@@ -54,13 +56,25 @@ func TestReloadExtension(t *testing.T) {
 		return nil, nil
 	}
 	t.Cleanup(func() { pluginkit = saved })
+	const appex = "/A/Loopwall.app/Contents/Extensions/LoopwallExtension.appex"
+	line := func(path string) string {
+		return "     local.lumiaqian.loopwall.extension(0.1.3)\t3E4346A8-0000-0000-0000-000000000000\t2026-11-19 11:01:26 +0000\t" + path + "\n"
+	}
 
-	listed = "     local.lumiaqian.loopwall.extension(0.1.2)\n"
-	if err := reloadExtension("/A/LoopwallExtension.appex"); err != nil || len(calls) != 1 {
-		t.Fatalf("registered: %v, calls %v", err, calls)
+	listed = line(appex)
+	if err := reloadExtension(appex + "/"); err != nil || len(calls) != 1 || calls[0] != "-m -v -i "+catalog.ExtensionID {
+		t.Fatalf("registered at this path: %v, calls %v", err, calls)
+	}
+	calls, listed = nil, line("/B/Loopwall.app/Contents/Extensions/LoopwallExtension.appex")
+	if err := reloadExtension(appex); err != nil || len(calls) != 2 || calls[1] != "-a "+appex {
+		t.Fatalf("registered at another path: %v, calls %v", err, calls)
+	}
+	calls, listed = nil, line("/B/x.appex")+line(appex)
+	if err := reloadExtension(appex); err != nil || len(calls) != 1 {
+		t.Fatalf("registered at several paths, one this: %v, calls %v", err, calls)
 	}
 	calls, listed = nil, "\n"
-	if err := reloadExtension("/A/LoopwallExtension.appex"); err != nil || len(calls) != 2 || calls[1] != "-a /A/LoopwallExtension.appex" {
+	if err := reloadExtension(appex); err != nil || len(calls) != 2 || calls[1] != "-a "+appex {
 		t.Fatalf("lost: %v, calls %v", err, calls)
 	}
 	pluginkit = func(args ...string) ([]byte, error) {
@@ -69,7 +83,7 @@ func TestReloadExtension(t *testing.T) {
 		}
 		return []byte("no such plug-in"), errors.New("exit status 1")
 	}
-	if err := reloadExtension("/A/LoopwallExtension.appex"); err == nil {
+	if err := reloadExtension(appex); err == nil {
 		t.Error("a failed registration reported none")
 	}
 }
@@ -130,6 +144,29 @@ func TestRelaunchGuard(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = running.Process.Kill(); _ = running.Wait() })
 	if err := startRelaunchGuard(app("0.2"), back, opener, 200*time.Millisecond, time.Minute); err != nil {
+		t.Fatal(err)
+	}
+	if got := wasOpened(2 * time.Second); got != "" {
+		t.Errorf("opened %q though it runs again", got)
+	}
+	_ = os.Remove(opened)
+
+	// A path with characters a regular expression reads (parentheses, +, .)
+	// is matched as it is.
+	odd := filepath.Join(dir, "Loopwall (1)+.app")
+	oddExe := filepath.Join(odd, "Contents", "MacOS", "Loopwall")
+	if err := os.MkdirAll(filepath.Dir(oddExe), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(oddExe, []byte("#!/bin/sh\nsleep \"$1\"\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	oddRunning := exec.Command(oddExe, "20")
+	if err := oddRunning.Start(); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = oddRunning.Process.Kill(); _ = oddRunning.Wait() })
+	if err := startRelaunchGuard(app("0.2"), odd, opener, 200*time.Millisecond, time.Minute); err != nil {
 		t.Fatal(err)
 	}
 	if got := wasOpened(2 * time.Second); got != "" {
