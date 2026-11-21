@@ -51,6 +51,9 @@ type DisplayProgress struct {
 	VideoID            string  `json:"videoID"`
 	PositionSeconds    float64 `json:"positionSeconds"`
 	ItemElapsedSeconds float64 `json:"itemElapsedSeconds"`
+	// LastSeenUnix is when the display last presented; the extension drops sessions
+	// unseen for 30 days. Absent in files written before it existed.
+	LastSeenUnix float64 `json:"lastSeenUnix,omitempty"`
 }
 type Runtime struct {
 	SchemaVersion     int               `json:"schemaVersion"`
@@ -61,6 +64,20 @@ type Runtime struct {
 	OpenVideoIDs      []string          `json:"openVideoIDs"`
 	KeepAwakeActive   bool              `json:"keepAwakeActive"`
 	Errors            []string          `json:"errors"`
+}
+
+const (
+	// RuntimeHeartbeat is how often the extension rewrites runtime.json when nothing
+	// but playback positions changed (PlaylistCadence.runtimeHeartbeat in Swift).
+	RuntimeHeartbeat = 10 * time.Second
+	// RuntimeStaleAfter is how old a report may be and still count as the extension's
+	// current state: three heartbeats, so one late write never reads as silence.
+	RuntimeStaleAfter = 3 * RuntimeHeartbeat
+)
+
+// Fresh reports whether the extension has written runtime.json recently enough to trust.
+func (r Runtime) Fresh(now time.Time) bool {
+	return now.Sub(time.Unix(int64(r.UpdatedAtUnix), 0)) <= RuntimeStaleAfter
 }
 
 func Default() Config {
@@ -272,7 +289,7 @@ func Reap(root string) error {
 	}
 
 	r, e := ReadRuntime(root)
-	if e != nil || r.AppliedRevision < c.Revision || time.Since(time.Unix(int64(r.UpdatedAtUnix), 0)) > 15*time.Second {
+	if e != nil || r.AppliedRevision < c.Revision || !r.Fresh(time.Now()) {
 		return nil
 	}
 	for _, id := range c.RemovedMediaIDs {

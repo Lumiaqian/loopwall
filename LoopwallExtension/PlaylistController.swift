@@ -15,7 +15,12 @@ final class PlaylistController: @unchecked Sendable {
     private var persistedRule: String?
     private var applied: [Int: String] = [:]
     private var timer: (any DispatchSourceTimer)?
+    private var tickMilliseconds = PlaylistCadence.presentingTickMilliseconds
     private var lastSave = Date.distantPast
+    private var lastWritten: PlaylistCadence.RuntimeStructure?
+    /// Set by a display reconfiguration; `refreshDisplays` clears it.
+    private var displaysDirty = true
+    private var lastDisplayRefresh = Date.distantPast
     private var activeKeys = Set<String>()
     private var lastOpenIDs = Set<String>()
     private var errors: [String] = []
@@ -33,14 +38,16 @@ final class PlaylistController: @unchecked Sendable {
     private static var runtimeURL: URL {
         VideoLibrary.documents.appendingPathComponent("runtime.json")
     }
+    /// Built in `reloadOnQueue` and refreshed by `refreshIndex`; the tick never stats files.
+    private var index = MediaIndex()
     private var items: [MediaEntry] {
-        config.playlist.videoIDs.compactMap { id in
-            guard usable(id) else { return nil }
-            return config.media.first { $0.id == id }
-        }
+        config.playlist.videoIDs.compactMap { id in usable(id) ? index.entry(for: id) : nil }
     }
     private func usable(_ id: String) -> Bool {
-        !rejected.contains(id) && VideoLibrary.shared.videoURL(for: id) != nil
+        !rejected.contains(id) && index.url(for: id) != nil
+    }
+    private func refreshIndex() {
+        index.refresh(now: Date()) { VideoLibrary.shared.availableURL(for: $0) }
     }
     /// What display `key` plays: its pinned video, or the playlist.
     private func items(for key: String) -> [MediaEntry] {
@@ -51,13 +58,17 @@ final class PlaylistController: @unchecked Sendable {
         queue.async { [self] in
             reloadOnQueue()
             let timer = DispatchSource.makeTimerSource(queue: queue)
-            timer.schedule(deadline: .now(), repeating: .milliseconds(100))
+            timer.schedule(deadline: .now(), repeating: .milliseconds(tickMilliseconds))
             timer.setEventHandler { [weak self] in self?.tick() }
             self.timer = timer; timer.resume()
         }
     }
     func reload() {
         queue.async { [self] in reloadOnQueue(); tick(); save() }
+    }
+    /// A display was added, removed or reconfigured: re-read the display list on the next tick.
+    func displaysChanged() {
+        queue.async { [self] in displaysDirty = true }
     }
     func lifecycleChanged() {
         queue.async { [self] in tick(); save() }
@@ -67,11 +78,11 @@ final class PlaylistController: @unchecked Sendable {
     }
     func mediaFailed(_ id: String?, message: String) {
         guard let id else { return }
-        queue.async { [self] in reject(id, message: message); tick(); save() }
+        queue.async { [self] in refreshIndex(); reject(id, message: message); tick(); save() }
     }
     private func reject(_ id: String, message: String) {
         guard rejected.insert(id).inserted else { return }
-        errors.append("无法解码：\(config.media.first { $0.id == id }?.name ?? id)（\(message)）")
+        errors.append("无法解码：\(index.entry(for: id)?.name ?? id)（\(message)）")
         extensionLog("[Playlist] Rejected media \(id): \(message)")
     }
 
@@ -80,7 +91,9 @@ final class PlaylistController: @unchecked Sendable {
         queue.sync {
             let playable = items
             guard !preview else { return playable.first.map { DisplayProgress(displayKey: "preview", videoID: $0.id) } }
-            refreshDisplays()
+            if displayKeys[displayID] == nil {
+                refreshDisplays()
+            }
             guard let key = displayKeys[displayID] else { return nil }
             ensureSession(key: key, items: items(for: key))
             return sessions[key]
@@ -89,6 +102,7 @@ final class PlaylistController: @unchecked Sendable {
     private func reloadOnQueue() {
         let old = config
         config = VideoLibrary.shared.config
+        index = MediaIndex(media: config.media, now: Date()) { VideoLibrary.shared.availableURL(for: $0) }
         rejected.removeAll(); errors.removeAll()
         let signature = "\(config.playlist.advanceMode):\(config.playlist.intervalSeconds)"
         let ruleChanged = persistedRule.map { $0 != signature } ?? (old.playlist.advanceMode != config.playlist.advanceMode || old.playlist.intervalSeconds != config.playlist.intervalSeconds)
@@ -105,6 +119,8 @@ final class PlaylistController: @unchecked Sendable {
         }
     }
     private func refreshDisplays() {
+        displaysDirty = false
+        lastDisplayRefresh = Date()
         var count: UInt32 = 0
         CGGetActiveDisplayList(0, nil, &count)
         var ids = [CGDirectDisplayID](repeating: 0, count: Int(count))
@@ -133,7 +149,12 @@ final class PlaylistController: @unchecked Sendable {
     }
 
     private func tick() {
-        refreshDisplays()
+        if index.isStale(now: Date()) {
+            refreshIndex()
+        }
+        if PlaylistCadence.displayRefreshDue(dirty: displaysDirty, lastRefresh: lastDisplayRefresh, now: Date()) {
+            refreshDisplays()
+        }
         let state = PlaybackStore.snapshot
         let registry = SurfaceRegistry.shared
         let playlist = items
@@ -163,7 +184,7 @@ final class PlaylistController: @unchecked Sendable {
                 rule: config.playlist,
                 leader: leader.map { PlaylistTick.Leader(id: $0.debugID, sample: $0.clockSample().rendererSample) },
                 state: &leaderState,
-                urlFor: { VideoLibrary.shared.videoURL(for: $0) },
+                urlFor: { index.url(for: $0) },
             )
             leaderStates[key] = leaderState
             if let id = outcome.rejectID {
@@ -175,9 +196,6 @@ final class PlaylistController: @unchecked Sendable {
                 leader.play(play.url, at: play.position, force: play.force)
             }
             crossedBoundary = outcome.crossedBoundary
-            if crossedBoundary {
-                lastSave = .distantPast
-            }
 
             sessions[key] = progress
             for (surfaceKey, surface) in surfaces {
@@ -196,7 +214,7 @@ final class PlaylistController: @unchecked Sendable {
                     continue
                 }
                 PlaylistTimeline.reconcile(&sessions[key]!, oldOrder: config.playlist.videoIDs, items: playable, resetElapsed: false)
-                guard let current = sessions[key], let url = VideoLibrary.shared.videoURL(for: current.videoID) else { continue }
+                guard let current = sessions[key], let url = index.url(for: current.videoID) else { continue }
                 let decision = PlaylistTick.surfaceStep(
                     current: current,
                     url: url,
@@ -220,31 +238,36 @@ final class PlaylistController: @unchecked Sendable {
                 open.insert(url.deletingLastPathComponent().lastPathComponent)
             }
             // Keep previews current after edits, without creating any persistent session.
-            if let first = playlist.first, let url = VideoLibrary.shared.videoURL(for: first.id) {
+            if let first = playlist.first, let url = index.url(for: first.id) {
                 renderer.play(url, at: 0)
             } else {
                 renderer.apply(.paused)
             }
         }
         applied = applied.filter { seenRenderers.contains($0.key) }
-        if active != activeKeys || open != lastOpenIDs {
-            lastSave = .distantPast
-        }
         activeKeys = active; lastOpenIDs = open
+        adaptTickRate(presenting: !active.isEmpty, displaysAsleep: state.displaysAsleep)
         awake.update(
             enabled: config.playlist.keepAwakeWhenLockedOnAC,
             locked: state.screenLocked,
             active: playing,
             asleep: state.displaysAsleep,
         )
-        if Date().timeIntervalSince(lastSave) >= 5 {
+        if PlaylistCadence.shouldWriteRuntime(current: runtimeStructure(), written: lastWritten, lastWrite: lastSave, now: Date()) {
             save()
         }
+    }
+    /// Reschedule the timer only when the rate actually changes.
+    private func adaptTickRate(presenting: Bool, displaysAsleep: Bool) {
+        let wanted = PlaylistCadence.tickMilliseconds(presenting: presenting, displaysAsleep: displaysAsleep)
+        guard wanted != tickMilliseconds else { return }
+        tickMilliseconds = wanted
+        timer?.schedule(deadline: .now() + .milliseconds(wanted), repeating: .milliseconds(wanted))
     }
     /// Reattach after an empty initial list becomes playable or a corrupt first
     /// asset was rejected. The registry claim prevents racing the XPC acquire task.
     private func attachRenderer(to key: SurfaceKey, progress: DisplayProgress?) {
-        guard let progress, let url = VideoLibrary.shared.videoURL(for: progress.videoID),
+        guard let progress, let url = index.url(for: progress.videoID),
               !items(for: progress.displayKey).isEmpty, let surface = SurfaceRegistry.shared.surface(for: key),
               SurfaceRegistry.shared.claimRendererCreate(for: key) else { return }
         let root = SendableBox(value: surface.rootLayer)
@@ -263,20 +286,44 @@ final class PlaylistController: @unchecked Sendable {
         }
     }
 
-    private func save() {
-        let runtime = RuntimeState(
+    private func runtimeErrors() -> [String] {
+        var lines = errors
+        if items.isEmpty {
+            lines.append("播放列表为空或没有可播放的视频，保留末帧")
+        }
+        if let line = PlaylistCadence.unverifiedCallerError(count: CallerValidation.unverifiedCount) {
+            lines.append(line)
+        }
+        return lines
+    }
+    private func runtimeStructure() -> PlaylistCadence.RuntimeStructure {
+        PlaylistCadence.RuntimeStructure(
             appliedRevision: config.revision,
+            activeDisplayKeys: activeKeys.sorted(),
+            openVideoIDs: lastOpenIDs.sorted(),
+            videoIDs: sessions.mapValues(\.videoID),
+            errors: runtimeErrors(),
+            keepAwakeActive: awake.isActive,
+        )
+    }
+
+    private func save() {
+        SessionPruning.prune(&sessions, active: activeKeys, now: Date().timeIntervalSince1970)
+        let structure = runtimeStructure()
+        let runtime = RuntimeState(
+            appliedRevision: structure.appliedRevision,
             ruleSignature: persistedRule,
             updatedAtUnix: Date().timeIntervalSince1970,
             displays: sessions.values.sorted { $0.displayKey < $1.displayKey },
-            activeDisplayKeys: activeKeys.sorted(),
-            openVideoIDs: lastOpenIDs.sorted(),
-            keepAwakeActive: awake.isActive,
-            errors: items.isEmpty ? errors + ["播放列表为空或没有可播放的视频，保留末帧"] : errors,
+            activeDisplayKeys: structure.activeDisplayKeys,
+            openVideoIDs: structure.openVideoIDs,
+            keepAwakeActive: structure.keepAwakeActive,
+            errors: structure.errors,
         )
         do {
             try JSONEncoder().encode(runtime).write(to: Self.runtimeURL, options: .atomic)
             lastSave = Date()
+            lastWritten = structure
         } catch { extensionLog("[Playlist] Cannot save progress: \(error)") }
     }
 }

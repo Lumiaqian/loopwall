@@ -24,8 +24,8 @@ const (
 	// also what a locked screen looks like, so the app only offers it.
 	stallAfter = 20 * time.Second
 	// silentAfter is how old the extension's last report is when it counts
-	// as silent.
-	silentAfter = 30 * time.Second
+	// as silent: it writes at least every catalog.RuntimeHeartbeat.
+	silentAfter = catalog.RuntimeStaleAfter
 	// repairSettle is how long a repair takes to show, during which the app
 	// neither offers nor makes another.
 	repairSettle = 30 * time.Second
