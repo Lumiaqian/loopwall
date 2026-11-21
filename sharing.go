@@ -397,14 +397,14 @@ func (a *application) pullVideo(p share.Peer, it share.Item) {
 			})
 		}, a.probe)
 		// Read before the deferred cancel: a failure is not a cancellation.
-		cancelled := errors.Is(ctx.Err(), context.Canceled)
+		outcome := pullOutcome(err, ctx.Err())
 		mygo.RunOnMain(func() {
 			defer a.invalidate()
-			switch {
-			case cancelled && err != nil:
+			switch outcome {
+			case pullCancelled:
 				delete(s.pulls, key)
 				return
-			case err != nil:
+			case pullFailed:
 				pl.err = friendly(err)
 				return
 			}
@@ -420,6 +420,28 @@ func (a *application) pullVideo(p share.Peer, it share.Item) {
 		})
 	}()
 }
+
+// pullOutcome is how a pull ended: err is the import's, ctxErr the pull's
+// context's, read before it is cancelled for good. A failure that is not
+// the user's cancelling stays listed, with its reason; a cancel leaves
+// nothing; a pull that finished before the cancel arrived is done.
+func pullOutcome(err, ctxErr error) pullState {
+	switch {
+	case err == nil:
+		return pullDone
+	case errors.Is(ctxErr, context.Canceled):
+		return pullCancelled
+	}
+	return pullFailed
+}
+
+type pullState int
+
+const (
+	pullDone pullState = iota
+	pullCancelled
+	pullFailed
+)
 
 // friendly words an error of sharing for the user: the network's own,
 // as a refused or timed out connection, say what likely happened.
