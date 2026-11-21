@@ -33,14 +33,16 @@ final class PlaylistController: @unchecked Sendable {
     private static var runtimeURL: URL {
         VideoLibrary.documents.appendingPathComponent("runtime.json")
     }
+    /// Built in `reloadOnQueue` and refreshed by `refreshIndex`; the tick never stats files.
+    private var index = MediaIndex()
     private var items: [MediaEntry] {
-        config.playlist.videoIDs.compactMap { id in
-            guard usable(id) else { return nil }
-            return config.media.first { $0.id == id }
-        }
+        config.playlist.videoIDs.compactMap { id in usable(id) ? index.entry(for: id) : nil }
     }
     private func usable(_ id: String) -> Bool {
-        !rejected.contains(id) && VideoLibrary.shared.videoURL(for: id) != nil
+        !rejected.contains(id) && index.url(for: id) != nil
+    }
+    private func refreshIndex() {
+        index.refresh(now: Date()) { VideoLibrary.shared.availableURL(for: $0) }
     }
     /// What display `key` plays: its pinned video, or the playlist.
     private func items(for key: String) -> [MediaEntry] {
@@ -67,11 +69,11 @@ final class PlaylistController: @unchecked Sendable {
     }
     func mediaFailed(_ id: String?, message: String) {
         guard let id else { return }
-        queue.async { [self] in reject(id, message: message); tick(); save() }
+        queue.async { [self] in refreshIndex(); reject(id, message: message); tick(); save() }
     }
     private func reject(_ id: String, message: String) {
         guard rejected.insert(id).inserted else { return }
-        errors.append("无法解码：\(config.media.first { $0.id == id }?.name ?? id)（\(message)）")
+        errors.append("无法解码：\(index.entry(for: id)?.name ?? id)（\(message)）")
         extensionLog("[Playlist] Rejected media \(id): \(message)")
     }
 
@@ -89,6 +91,7 @@ final class PlaylistController: @unchecked Sendable {
     private func reloadOnQueue() {
         let old = config
         config = VideoLibrary.shared.config
+        index = MediaIndex(media: config.media, now: Date()) { VideoLibrary.shared.availableURL(for: $0) }
         rejected.removeAll(); errors.removeAll()
         let signature = "\(config.playlist.advanceMode):\(config.playlist.intervalSeconds)"
         let ruleChanged = persistedRule.map { $0 != signature } ?? (old.playlist.advanceMode != config.playlist.advanceMode || old.playlist.intervalSeconds != config.playlist.intervalSeconds)
@@ -133,6 +136,9 @@ final class PlaylistController: @unchecked Sendable {
     }
 
     private func tick() {
+        if index.isStale(now: Date()) {
+            refreshIndex()
+        }
         refreshDisplays()
         let state = PlaybackStore.snapshot
         let registry = SurfaceRegistry.shared
@@ -163,7 +169,7 @@ final class PlaylistController: @unchecked Sendable {
                 rule: config.playlist,
                 leader: leader.map { PlaylistTick.Leader(id: $0.debugID, sample: $0.clockSample().rendererSample) },
                 state: &leaderState,
-                urlFor: { VideoLibrary.shared.videoURL(for: $0) },
+                urlFor: { index.url(for: $0) },
             )
             leaderStates[key] = leaderState
             if let id = outcome.rejectID {
@@ -196,7 +202,7 @@ final class PlaylistController: @unchecked Sendable {
                     continue
                 }
                 PlaylistTimeline.reconcile(&sessions[key]!, oldOrder: config.playlist.videoIDs, items: playable, resetElapsed: false)
-                guard let current = sessions[key], let url = VideoLibrary.shared.videoURL(for: current.videoID) else { continue }
+                guard let current = sessions[key], let url = index.url(for: current.videoID) else { continue }
                 let decision = PlaylistTick.surfaceStep(
                     current: current,
                     url: url,
@@ -220,7 +226,7 @@ final class PlaylistController: @unchecked Sendable {
                 open.insert(url.deletingLastPathComponent().lastPathComponent)
             }
             // Keep previews current after edits, without creating any persistent session.
-            if let first = playlist.first, let url = VideoLibrary.shared.videoURL(for: first.id) {
+            if let first = playlist.first, let url = index.url(for: first.id) {
                 renderer.play(url, at: 0)
             } else {
                 renderer.apply(.paused)
@@ -244,7 +250,7 @@ final class PlaylistController: @unchecked Sendable {
     /// Reattach after an empty initial list becomes playable or a corrupt first
     /// asset was rejected. The registry claim prevents racing the XPC acquire task.
     private func attachRenderer(to key: SurfaceKey, progress: DisplayProgress?) {
-        guard let progress, let url = VideoLibrary.shared.videoURL(for: progress.videoID),
+        guard let progress, let url = index.url(for: progress.videoID),
               !items(for: progress.displayKey).isEmpty, let surface = SurfaceRegistry.shared.surface(for: key),
               SurfaceRegistry.shared.claimRendererCreate(for: key) else { return }
         let root = SendableBox(value: surface.rootLayer)

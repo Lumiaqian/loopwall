@@ -230,3 +230,30 @@ tickState = PlaylistTick.LeaderState()
 tickOut = leaderTick(&tickProgress, tickSample(tickA, seconds: 0, failedOn: tickB, serial: 5), state: &tickState)
 require(tickOut.rejectID == nil && tickOut.retry == nil, "a failure of another URL does not reject the current video")
 print("PASS: renderer failure recovery decisions")
+
+// Media index: the tick reads cached URLs; only `refresh` touches the file system.
+var statCount = 0
+var presentFiles: Set<String> = [tickA.id, tickB.id]
+let statURL: (MediaEntry) -> URL? = { entry in
+    statCount += 1
+    return presentFiles.contains(entry.id) ? tickURLs[entry.id] : nil
+}
+let indexStart = Date(timeIntervalSince1970: 1_000)
+var mediaIndex = MediaIndex(media: [tickA, tickB], now: indexStart, urlFor: statURL)
+require(statCount == 2, "building the index stats each file once")
+for _ in 0 ..< 100 {
+    require(mediaIndex.url(for: tickA.id) == tickURLs[tickA.id] && mediaIndex.entry(for: tickB.id) == tickB, "lookups come from the cache")
+}
+require(statCount == 2, "lookups never stat")
+require(mediaIndex.url(for: "missing") == nil && mediaIndex.entry(for: "missing") == nil, "unknown IDs are absent")
+require(!mediaIndex.isStale(now: indexStart.addingTimeInterval(9.9)), "the index is fresh inside the recheck interval")
+require(mediaIndex.isStale(now: indexStart.addingTimeInterval(10)), "the index goes stale after the recheck interval")
+presentFiles.remove(tickB.id)
+require(mediaIndex.url(for: tickB.id) != nil, "a deleted file stays cached until the next refresh")
+require(mediaIndex.refresh(now: indexStart.addingTimeInterval(10), urlFor: statURL), "refresh reports the change")
+require(mediaIndex.url(for: tickB.id) == nil && mediaIndex.url(for: tickA.id) != nil, "refresh notices a vanished file")
+require(!mediaIndex.isStale(now: indexStart.addingTimeInterval(11)), "refresh restarts the interval")
+presentFiles.insert(tickB.id)
+require(mediaIndex.refresh(now: indexStart.addingTimeInterval(20), urlFor: statURL) && mediaIndex.url(for: tickB.id) != nil, "refresh notices a file that appears")
+require(!mediaIndex.refresh(now: indexStart.addingTimeInterval(30), urlFor: statURL), "an unchanged refresh reports no change")
+print("PASS: media index")
