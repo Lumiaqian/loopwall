@@ -276,6 +276,7 @@ func TestPairingIsMutual(t *testing.T) {
 func TestOldPeerPairsOneWay(t *testing.T) {
 	root, _ := library(t)
 	s, st, peer := serve(t, root)
+	s.SetLegacy(true)
 	old := open(t)
 	body := `{"device":"` + old.Device() + `","name":"旧版","code":"` + s.Code() + `"}`
 	hc := httpClient(nil, func(string) error { return nil }, nil, 5*time.Second)

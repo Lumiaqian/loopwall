@@ -21,6 +21,9 @@ var (
 	// ErrWrongCode is a pairing code the peer refused; after a few, it
 	// voids its code and shows a new one.
 	ErrWrongCode = errors.New("配对码不对，或已失效；请看对方 Mac 上显示的配对码")
+	// ErrLegacyDenied is a peer that takes no pairing by six digits: it
+	// must allow it, or be updated and show its long code.
+	ErrLegacyDenied = errors.New("对方没有允许旧版配对：请在对方 Mac 的「设置 → 局域网共享」打开「允许旧版 Loopwall 配对（不安全）」，或把对方升级到新版后输入它显示的新配对码")
 	// ErrChangedCertificate is a peer presenting another certificate than
 	// it paired with: another Mac in its place, or its sharing reset.
 	ErrChangedCertificate = errors.New("对方的身份变了，请重新配对")
@@ -133,6 +136,9 @@ func (c *Client) pair(ctx context.Context, peer Peer, secret string, want *PairC
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode == http.StatusForbidden {
+		if resp.Header.Get(errHeader) == errLegacyDenied {
+			return ErrLegacyDenied
+		}
 		return ErrWrongCode
 	}
 	if resp.StatusCode != http.StatusOK {
@@ -142,7 +148,7 @@ func (c *Client) pair(ctx context.Context, peer Peer, secret string, want *PairC
 	if err = json.NewDecoder(io.LimitReader(resp.Body, 4096)).Decode(&pr); err != nil || pr.Token == "" || seen == "" {
 		return errors.New("配对失败：对方的回应无效")
 	}
-	return c.store.Pair(peer.Device, Paired{Name: peer.Name, Token: pr.Token, Fingerprint: seen})
+	return c.store.Pair(peer.Device, Paired{Name: peer.Name, Token: pr.Token, Fingerprint: seen, Verified: want != nil})
 }
 
 // Unpair forgets device both ways: it tells the peer at addr, when it is
