@@ -106,3 +106,13 @@ var badPins = config
 badPins.playlist.pins = ["display-A": "44444444-4444-4444-8444-444444444444"]
 require((try? badPins.validated()) == nil, "a pin to a missing video is rejected")
 print("PASS: per-display pins")
+
+/// Snapshot sizing: the smallest frame that still covers the display.
+let hd = CGSize(width: 1_920, height: 1_080)
+require(SnapshotSizing.maximumSize(videoSize: CGSize(width: 7_680, height: 4_320), displayPixels: CGSize(width: 1_000, height: 1_000)) == CGSize(width: 1_778, height: 1_000), "wide video on a narrow display is fitted by its height")
+require(SnapshotSizing.maximumSize(videoSize: CGSize(width: 2_160, height: 3_840), displayPixels: CGSize(width: 1_440, height: 2_560)) == CGSize(width: 1_440, height: 2_560), "tall video on a tall display")
+require(SnapshotSizing.maximumSize(videoSize: CGSize(width: -1_080, height: 1_920), displayPixels: hd) == CGSize(width: 1_080, height: 1_920), "a rotated size's signs are ignored; a video smaller than the display is unchanged")
+require(SnapshotSizing.maximumSize(videoSize: CGSize(width: 3_840, height: 2_160), displayPixels: hd) == hd, "a 4K video on a 1080p display")
+require(SnapshotSizing.maximumSize(videoSize: .zero, displayPixels: hd) == nil, "an empty video size is unknown")
+require(SnapshotSizing.maximumSize(videoSize: hd, displayPixels: .zero) == nil, "an empty display size is unknown")
+print("PASS: snapshot sizing")

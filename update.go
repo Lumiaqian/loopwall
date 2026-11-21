@@ -1,11 +1,11 @@
 package main
 
 import (
-	"bytes"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"syscall"
 	"time"
 
@@ -42,14 +42,41 @@ func (a *application) launchedVersion(current string) bool {
 	return last != ""
 }
 
-// reloadExtension registers the extension in appex unless it is
-// registered, off the main thread.
+// reloadExtension registers the extension in appex unless PlugInKit already
+// has it registered at that path, off the main thread. A registration at
+// another path, as an older copy of the app leaves, does not count: the
+// system would keep loading that copy.
 func reloadExtension(appex string) error {
-	if out, err := pluginkit("-m", "-i", catalog.ExtensionID); err == nil && len(bytes.TrimSpace(out)) > 0 {
+	if out, err := pluginkit("-m", "-v", "-i", catalog.ExtensionID); err == nil && registeredAt(out, appex) {
 		return nil
 	}
 	_, err := pluginkit("-a", appex)
 	return err
+}
+
+// registeredAt reports whether the paths in the output of pluginkit -m -v
+// include appex. Each plug-in line ends in its path after a tab.
+func registeredAt(out []byte, appex string) bool {
+	want := canonicalPath(appex)
+	for _, line := range strings.Split(string(out), "\n") {
+		fields := strings.Split(strings.TrimRight(line, "\r"), "\t")
+		if len(fields) < 2 {
+			continue
+		}
+		if path := strings.TrimSpace(fields[len(fields)-1]); filepath.IsAbs(path) && canonicalPath(path) == want {
+			return true
+		}
+	}
+	return false
+}
+
+// canonicalPath cleans path and resolves its symbolic links when it can.
+func canonicalPath(path string) string {
+	path = filepath.Clean(path)
+	if real, err := filepath.EvalSymlinks(path); err == nil {
+		return real
+	}
+	return path
 }
 
 // appBundle is the .app bundle the app runs from.
@@ -105,7 +132,10 @@ while kill -0 "$pid" 2>/dev/null; do
 	sleep 0.2
 done
 sleep "$delay"
-pgrep -qf "$app/Contents/MacOS/" || exec "$opener" "$app"
+# A literal match: a path has characters a regular expression would read.
+ps -axww -o command= | { while IFS= read -r c; do
+	case "$c" in *"$app/Contents/MacOS/"*) exit 0;; esac
+done; exit 1; } || exec "$opener" "$app"
 `
 
 // startRelaunchGuard runs relaunchGuard for the app of pid at bundle,

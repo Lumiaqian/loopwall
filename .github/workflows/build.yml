@@ -24,17 +24,34 @@ jobs:
     runs-on: xcode-27
     timeout-minutes: 40
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - uses: actions/setup-go@v7
+      - uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5 # v7.1.0
         with:
           go-version-file: go.mod
 
+      # The same versions as local development, from the official releases and
+      # verified by checksum, so a new release cannot change the lint result.
       - name: Tools
+        env:
+          SWIFTFORMAT_VERSION: 0.64.6
+          SWIFTFORMAT_SHA256: 70e6b2057647fb1c54d620ebbb6649274de56534c57f91f67461a129ebaaba3e
+          SWIFTLINT_VERSION: 0.65.1
+          SWIFTLINT_SHA256: c1e429b0599cf1b516f369a2d9ec04eaf0e436f3c12b637df8851fa52ff694d0
         run: |
           xcodebuild -version
           go version
-          brew install swiftformat swiftlint
+          tools="$RUNNER_TEMP/lint-tools"
+          mkdir -p "$tools/dl"
+          curl -fsSL -o "$tools/dl/swiftformat.zip" "https://github.com/nicklockwood/SwiftFormat/releases/download/$SWIFTFORMAT_VERSION/swiftformat.zip"
+          curl -fsSL -o "$tools/dl/swiftlint.zip" "https://github.com/realm/SwiftLint/releases/download/$SWIFTLINT_VERSION/portable_swiftlint.zip"
+          echo "$SWIFTFORMAT_SHA256  $tools/dl/swiftformat.zip" | shasum -a 256 -c -
+          echo "$SWIFTLINT_SHA256  $tools/dl/swiftlint.zip" | shasum -a 256 -c -
+          unzip -q "$tools/dl/swiftformat.zip" swiftformat -d "$tools"
+          unzip -q "$tools/dl/swiftlint.zip" swiftlint -d "$tools"
+          echo "$tools" >> "$GITHUB_PATH"
+          "$tools/swiftformat" --version
+          "$tools/swiftlint" --version
 
       - name: Native bridge is up to date
         run: |
@@ -49,6 +66,12 @@ jobs:
           test -z "$(gofmt -l .)"
           swiftformat --lint .
           swiftlint lint --quiet LoopwallExtension internal/platform/swift/Sources/Platform tests
+
+      - name: Staticcheck
+        run: go run honnef.co/go/tools/cmd/staticcheck@v0.8.2 ./...
+
+      - name: Govulncheck
+        run: go run golang.org/x/vuln/cmd/govulncheck@v1.10.0 ./...
 
       - name: Build
         run: scripts/build-local.sh
@@ -99,7 +122,7 @@ jobs:
           print("Apple Silicon、macOS 26 及以上。已安装 0.1.2 及以后版本的会自动提示更新。首次安装：解压后把 Loopwall.app 放进「应用程序」；本构建为 ad-hoc 签名、未经公证，首次打开若被拦截，到「系统设置 → 隐私与安全性」点「仍要打开」，或运行 `xattr -dr com.apple.quarantine /Applications/Loopwall.app`。然后在系统墙纸设置里选择「Loopwall 轮播」。")
           PY
 
-      - uses: actions/upload-artifact@v7
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: Loopwall-arm64
           path: |
@@ -122,7 +145,7 @@ jobs:
     permissions:
       contents: write
     steps:
-      - uses: actions/download-artifact@v8
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: Loopwall-arm64
 
