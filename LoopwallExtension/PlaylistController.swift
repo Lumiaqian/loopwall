@@ -301,6 +301,7 @@ final class PlaylistController: @unchecked Sendable {
     }
 
     private func save() {
+        SessionPruning.prune(&sessions, active: activeKeys, now: Date().timeIntervalSince1970)
         let structure = runtimeStructure()
         let runtime = RuntimeState(
             appliedRevision: structure.appliedRevision,

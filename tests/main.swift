@@ -75,9 +75,11 @@ print("PASS: presentation-clock epochs and surface reactivation")
 let fixtureDirectory = URL(fileURLWithPath: CommandLine.arguments[1]).deletingLastPathComponent()
 let goRuntime = try JSONDecoder().decode(RuntimeState.self, from: Data(contentsOf: fixtureDirectory.appendingPathComponent("go-runtime.json")))
 require(goRuntime.displays[0].displayKey == "display-A" && goRuntime.displays[0].positionSeconds == 61.5, "Go runtime is read in seconds")
+require(goRuntime.displays[0].lastSeenUnix == 1_700_000_000, "Go lastSeenUnix is read")
 var swiftRuntime = RuntimeState()
 var savedDisplay = b
 savedDisplay.displayKey = "display-B"
+savedDisplay.lastSeenUnix = 1_700_000_123
 swiftRuntime.displays = [savedDisplay]
 try JSONEncoder().encode(swiftRuntime).write(to: fixtureDirectory.appendingPathComponent("runtime.json"), options: .atomic)
 let display = CGSize(width: 2_560, height: 1_440)
@@ -298,3 +300,26 @@ require(writeDue(changedStructure, after: 0.1), "a new error is written at once"
 changedStructure = baseStructure; changedStructure.keepAwakeActive = true
 require(writeDue(changedStructure, after: 0.1), "a keep-awake change is written at once")
 print("PASS: runtime write policy")
+
+/// Session pruning: a display unseen for 30 days is forgotten; legacy files age from now.
+let pruneNow = 2_000_000_000.0
+let thirtyOneDays = 31.0 * 24 * 3_600
+var pruned: [String: DisplayProgress] = [
+    "active": DisplayProgress(displayKey: "active", videoID: "v", lastSeenUnix: pruneNow - thirtyOneDays),
+    "recent": DisplayProgress(displayKey: "recent", videoID: "v", lastSeenUnix: pruneNow - 29 * 24 * 3_600),
+    "old": DisplayProgress(displayKey: "old", videoID: "v", lastSeenUnix: pruneNow - thirtyOneDays),
+    "legacy": DisplayProgress(displayKey: "legacy", videoID: "v"),
+]
+SessionPruning.prune(&pruned, active: ["active"], now: pruneNow)
+require(pruned["active"]?.lastSeenUnix == pruneNow, "an active session is stamped, however old its last stamp")
+require(pruned["recent"]?.lastSeenUnix == pruneNow - 29 * 24 * 3_600, "a session inside the retention window is kept untouched")
+require(pruned["old"] == nil, "a session unseen for over 30 days is dropped")
+require(pruned["legacy"]?.lastSeenUnix == pruneNow, "a session from an older file starts aging from now")
+SessionPruning.prune(&pruned, active: [], now: pruneNow + 29 * 24 * 3_600)
+require(pruned["legacy"] != nil, "a legacy session survives its first 30 days")
+SessionPruning.prune(&pruned, active: [], now: pruneNow + thirtyOneDays)
+require(pruned["legacy"] == nil && pruned["active"] == nil && pruned["recent"] == nil, "idle sessions age out")
+let legacyJSON = Data(#"{"displayKey":"d","videoID":"v","positionSeconds":1,"itemElapsedSeconds":2}"#.utf8)
+let legacyDecoded = try JSONDecoder().decode(DisplayProgress.self, from: legacyJSON)
+require(legacyDecoded.lastSeenUnix == nil, "files without lastSeenUnix still decode")
+print("PASS: session pruning")
