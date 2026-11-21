@@ -37,6 +37,9 @@ type PlaylistSpec struct {
 	// Pins maps a display's UUID to the one video it plays instead of the
 	// playlist. Optional, so configurations written before it read unchanged.
 	Pins map[string]string `json:"pins,omitempty"`
+	// PowerSaving pauses the wallpaper on battery, in Low Power Mode or under
+	// serious thermal pressure. Optional and off when absent.
+	PowerSaving bool `json:"powerSaving,omitempty"`
 }
 type Config struct {
 	// RemovedMediaIDs records explicit deletions. Unpublished imports are never cleanup candidates.
@@ -63,7 +66,10 @@ type Runtime struct {
 	ActiveDisplayKeys []string          `json:"activeDisplayKeys"`
 	OpenVideoIDs      []string          `json:"openVideoIDs"`
 	KeepAwakeActive   bool              `json:"keepAwakeActive"`
-	Errors            []string          `json:"errors"`
+	// PowerSavingActive is set while the power-saving setting holds playback,
+	// so an empty ActiveDisplayKeys is deliberate rather than a stall.
+	PowerSavingActive bool     `json:"powerSavingActive,omitempty"`
+	Errors            []string `json:"errors"`
 }
 
 const (

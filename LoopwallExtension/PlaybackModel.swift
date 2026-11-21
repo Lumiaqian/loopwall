@@ -20,11 +20,29 @@ nonisolated struct Surface: Equatable, Sendable {
     var activity: ActivityState = .active
     var generation: Int
 }
+/// What the machine reports about its power; only the optional power-saving setting
+/// decides whether any of it pauses playback.
+nonisolated struct PowerConditions: Equatable, Sendable {
+    var onBattery = false
+    var lowPowerMode = false
+    var thermalState = ProcessInfo.ThermalState.nominal
+    /// Running on battery, in Low Power Mode, or hot enough that the system asks to back off.
+    var constrained: Bool {
+        onBattery || lowPowerMode || thermalState == .serious || thermalState == .critical
+    }
+}
 nonisolated struct PlaybackState: Equatable, Sendable {
     var surfaces: [SurfaceKey: Surface] = [:]
     var screenLocked = false
     var displaysAsleep = false
+    /// The playlist's optional `powerSaving` setting, and the latest power report.
+    var powerSaving = false
+    var power = PowerConditions()
     var nextGeneration = 0
+    /// Power saving is on and the machine is under a power constraint.
+    var pausedForPower: Bool {
+        powerSaving && power.constrained
+    }
 }
 nonisolated enum PlaybackEvent: Sendable {
     case surfaceAcquired(SurfaceKey, displayID: UInt32?, role: SurfaceRole, choice: String?)
@@ -33,6 +51,8 @@ nonisolated enum PlaybackEvent: Sendable {
     case agentUpdate(SurfaceKey?, mode: PresentationMode, activity: ActivityState)
     case screenLockChanged(Bool)
     case displaysAsleepChanged(Bool)
+    case powerSavingSettingChanged(Bool)
+    case powerChanged(PowerConditions)
 }
 nonisolated struct SurfaceTarget: Equatable, Sendable {
     var policy: PlaybackPolicy
@@ -57,11 +77,13 @@ nonisolated enum PlaybackReducer {
             }
         case let .screenLockChanged(locked): next.screenLocked = locked
         case let .displaysAsleepChanged(asleep): next.displaysAsleep = asleep
+        case let .powerSavingSettingChanged(enabled): next.powerSaving = enabled
+        case let .powerChanged(power): next.power = power
         }
         return next
     }
     static func target(for surface: Surface, in state: PlaybackState) -> SurfaceTarget {
-        SurfaceTarget(policy: state.displaysAsleep || surface.activity == .suspended ? .paused : .full)
+        SurfaceTarget(policy: state.displaysAsleep || state.pausedForPower || surface.activity == .suspended ? .paused : .full)
     }
     static func targets(_ state: PlaybackState) -> [SurfaceKey: SurfaceTarget] {
         state.surfaces.mapValues { target(for: $0, in: state) }
