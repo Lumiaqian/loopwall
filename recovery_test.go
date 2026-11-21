@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/Lumiaqian/loopwall/internal/catalog"
+	"github.com/Lumiaqian/loopwall/internal/platform"
 )
 
 func TestWallpaperRecovery(t *testing.T) {
@@ -119,5 +120,30 @@ func TestRuntimeFreshAllowsHeartbeatGap(t *testing.T) {
 	a.runtime.UpdatedAtUnix = float64(time.Now().Add(-(catalog.RuntimeStaleAfter + 10*time.Second)).Unix())
 	if a.runtimeFresh() {
 		t.Fatal("a report past the stale limit counts as fresh")
+	}
+}
+
+// runtime.json keeps every display that ever appeared: only those
+// connected now can be waiting.
+func TestWaitingCountsConnectedDisplaysOnly(t *testing.T) {
+	now := time.Unix(3_000_000, 0)
+	r := catalog.Runtime{UpdatedAtUnix: float64(now.Unix()), Displays: []catalog.DisplayProgress{{DisplayKey: "gone"}, {DisplayKey: "here"}}}
+	connected := []platform.DisplayInfo{{Identifier: "here"}}
+
+	a := &application{root: t.TempDir(), displays: []platform.DisplayInfo{{Identifier: "other"}}}
+	a.observeWallpaper(r, 0, now)
+	if !a.stallSince.IsZero() {
+		t.Fatal("a runtime of displays all gone counted as waiting")
+	}
+	a.displays = connected
+	a.observeWallpaper(r, 0, now)
+	if a.stallSince.IsZero() {
+		t.Fatal("a connected display that shows nothing is not waiting")
+	}
+	a.stallSince = time.Time{}
+	r.ActiveDisplayKeys = []string{"here"}
+	a.observeWallpaper(r, 0, now)
+	if !a.stallSince.IsZero() {
+		t.Fatal("an active display counted as waiting")
 	}
 }

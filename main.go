@@ -160,10 +160,10 @@ func main() {
 						app.share.status = sharingStatus
 					}
 					app.runtime = r
-					app.observeWallpaper(r, stuck, time.Now())
 					if err == nil {
 						app.displays = displays
 					}
+					app.observeWallpaper(r, stuck, time.Now())
 					if app.window != nil {
 						app.window.Invalidate()
 					}
