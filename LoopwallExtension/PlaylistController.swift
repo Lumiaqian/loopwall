@@ -164,84 +164,137 @@ final class PlaylistController: @unchecked Sendable {
             PowerMonitor.refresh() // posts only when the conditions changed
         }
         let state = PlaybackStore.snapshot
-        let registry = SurfaceRegistry.shared
         let playlist = items
+        var tally = TickTally()
+        let grouped = Dictionary(grouping: state.surfaces.filter { $0.value.role == .desktop }, by: { displayKeys[$0.key.displayID] ?? "" })
+        for (key, surfaces) in grouped where !key.isEmpty {
+            tickDisplay(key: key, surfaces: surfaces, state: state, tally: &tally)
+        }
+        refreshPreviews(playlist: playlist, open: &tally.open)
+        applied = applied.filter { tally.seenRenderers.contains($0.key) }
+        activeKeys = tally.active; lastOpenIDs = tally.open
+        powerSavingActive = state.pausedForPower
+        adaptTickRate(presenting: !tally.active.isEmpty, displaysAsleep: state.displaysAsleep)
+        awake.update(
+            enabled: config.playlist.keepAwakeWhenLockedOnAC,
+            locked: state.screenLocked,
+            active: tally.playing,
+            asleep: state.displaysAsleep,
+        )
+        if PlaylistCadence.shouldWriteRuntime(current: runtimeStructure(), written: lastWritten, lastWrite: lastSave, now: Date()) {
+            save()
+        }
+    }
+
+    /// What one tick learns across displays and surfaces.
+    private struct TickTally {
         var playing = false
         var active = Set<String>()
         var open = Set<String>()
         var seenRenderers = Set<Int>()
-        let grouped = Dictionary(grouping: state.surfaces.filter { $0.value.role == .desktop }, by: { displayKeys[$0.key.displayID] ?? "" })
-        for (key, surfaces) in grouped where !key.isEmpty {
-            var playable = items(for: key)
-            ensureSession(key: key, items: playable)
-            guard var progress = sessions[key] else { continue }
-            PlaylistTimeline.reconcile(&progress, oldOrder: config.playlist.videoIDs, items: playable, resetElapsed: false)
-            var crossedBoundary = false
-            // Prefer an actually presented surface; preview clocks are never leaders.
-            let visible = surfaces.filter { CGDisplayIsActive($0.key.displayID) != 0 && PlaybackReducer.target(for: $0.value, in: state).policy == .full }
-            let leader = visible.sorted { $0.value.generation > $1.value.generation }
-                .compactMap { registry.surface(for: $0.key)?.renderer }.first
-            if !visible.isEmpty {
-                active.insert(key)
-                playing = playing || !playable.isEmpty
-            }
-            var leaderState = leaderStates[key] ?? PlaylistTick.LeaderState()
-            let outcome = PlaylistTick.leaderStep(
-                progress: &progress,
-                playable: playable,
-                rule: config.playlist,
-                leader: leader.map { PlaylistTick.Leader(id: $0.debugID, sample: $0.clockSample().rendererSample) },
-                state: &leaderState,
-                urlFor: { index.url(for: $0) },
-            )
-            leaderStates[key] = leaderState
-            if let id = outcome.rejectID {
-                reject(id, message: "原生解码失败")
-                playable = items(for: key)
-                PlaylistTimeline.reconcile(&progress, oldOrder: config.playlist.videoIDs, items: playable, resetElapsed: true)
-            }
-            if let leader, let play = outcome.resync ?? outcome.retry {
-                leader.play(play.url, at: play.position, force: play.force)
-            }
-            crossedBoundary = outcome.crossedBoundary
+    }
 
-            sessions[key] = progress
-            for (surfaceKey, surface) in surfaces {
-                guard let renderer = registry.surface(for: surfaceKey)?.renderer else {
-                    attachRenderer(to: surfaceKey, progress: sessions[key])
-                    continue
-                }
-                seenRenderers.insert(renderer.debugID)
-                let sample = renderer.clockSample()
-                // A removed media file stays on disk until every native reader lets go.
-                for url in sample.openURLs {
-                    open.insert(url.deletingLastPathComponent().lastPathComponent)
-                }
-                if playable.isEmpty {
-                    renderer.apply(.paused)
-                    continue
-                }
-                PlaylistTimeline.reconcile(&sessions[key]!, oldOrder: config.playlist.videoIDs, items: playable, resetElapsed: false)
-                guard let current = sessions[key], let url = index.url(for: current.videoID) else { continue }
-                let decision = PlaylistTick.surfaceStep(
-                    current: current,
-                    url: url,
-                    sample: sample.rendererSample,
-                    applied: applied[renderer.debugID],
-                    crossedBoundary: crossedBoundary,
-                )
-                if let play = decision.play {
-                    renderer.play(play.url, at: play.position, force: play.force)
-                }
-                if decision.markApplied {
-                    applied[renderer.debugID] = current.videoID
-                }
-                let target = CGDisplayIsActive(surfaceKey.displayID) == 0 ? .paused : PlaybackReducer.target(for: surface, in: state)
-                renderer.apply(target)
-            }
+    /// One display's share of a tick: advance its timeline from the leader's clock, then
+    /// apply the result to each of its surfaces.
+    private func tickDisplay(key: String, surfaces: [(key: SurfaceKey, value: Surface)], state: PlaybackState, tally: inout TickTally) {
+        var playable = items(for: key)
+        ensureSession(key: key, items: playable)
+        guard var progress = sessions[key] else { return }
+        PlaylistTimeline.reconcile(&progress, oldOrder: config.playlist.videoIDs, items: playable, resetElapsed: false)
+        let crossedBoundary = stepLeader(key: key, surfaces: surfaces, state: state, progress: &progress, playable: &playable, tally: &tally)
+        sessions[key] = progress
+        for entry in surfaces {
+            applyToSurface(key: key, entry: entry, state: state, playable: playable, crossedBoundary: crossedBoundary, tally: &tally)
         }
-        for surfaceKey in registry.surfaceKeys {
-            guard let surface = registry.surface(for: surfaceKey), surface.isPreview, let renderer = surface.renderer else { continue }
+    }
+
+    /// Step the display's timeline from its leader renderer (an actually presented desktop
+    /// surface; preview clocks are never leaders). Returns whether the step crossed a boundary.
+    private func stepLeader(
+        key: String,
+        surfaces: [(key: SurfaceKey, value: Surface)],
+        state: PlaybackState,
+        progress: inout DisplayProgress,
+        playable: inout [MediaEntry],
+        tally: inout TickTally,
+    ) -> Bool {
+        let registry = SurfaceRegistry.shared
+        // Prefer an actually presented surface; preview clocks are never leaders.
+        let visible = surfaces.filter { CGDisplayIsActive($0.key.displayID) != 0 && PlaybackReducer.target(for: $0.value, in: state).policy == .full }
+        let leader = visible.sorted { $0.value.generation > $1.value.generation }
+            .compactMap { registry.surface(for: $0.key)?.renderer }.first
+        if !visible.isEmpty {
+            tally.active.insert(key)
+            tally.playing = tally.playing || !playable.isEmpty
+        }
+        var leaderState = leaderStates[key] ?? PlaylistTick.LeaderState()
+        let outcome = PlaylistTick.leaderStep(
+            progress: &progress,
+            playable: playable,
+            rule: config.playlist,
+            leader: leader.map { PlaylistTick.Leader(id: $0.debugID, sample: $0.clockSample().rendererSample) },
+            state: &leaderState,
+            urlFor: { index.url(for: $0) },
+        )
+        leaderStates[key] = leaderState
+        if let id = outcome.rejectID {
+            reject(id, message: "原生解码失败")
+            playable = items(for: key)
+            PlaylistTimeline.reconcile(&progress, oldOrder: config.playlist.videoIDs, items: playable, resetElapsed: true)
+        }
+        if let leader, let play = outcome.resync ?? outcome.retry {
+            leader.play(play.url, at: play.position, force: play.force)
+        }
+        return outcome.crossedBoundary
+    }
+
+    /// Apply the display's current item and playback target to one surface.
+    private func applyToSurface(
+        key: String,
+        entry: (key: SurfaceKey, value: Surface),
+        state: PlaybackState,
+        playable: [MediaEntry],
+        crossedBoundary: Bool,
+        tally: inout TickTally,
+    ) {
+        let (surfaceKey, surface) = entry
+        guard let renderer = SurfaceRegistry.shared.surface(for: surfaceKey)?.renderer else {
+            attachRenderer(to: surfaceKey, progress: sessions[key])
+            return
+        }
+        tally.seenRenderers.insert(renderer.debugID)
+        let sample = renderer.clockSample()
+        // A removed media file stays on disk until every native reader lets go.
+        for url in sample.openURLs {
+            tally.open.insert(url.deletingLastPathComponent().lastPathComponent)
+        }
+        if playable.isEmpty {
+            renderer.apply(.paused)
+            return
+        }
+        PlaylistTimeline.reconcile(&sessions[key]!, oldOrder: config.playlist.videoIDs, items: playable, resetElapsed: false)
+        guard let current = sessions[key], let url = index.url(for: current.videoID) else { return }
+        let decision = PlaylistTick.surfaceStep(
+            current: current,
+            url: url,
+            sample: sample.rendererSample,
+            applied: applied[renderer.debugID],
+            crossedBoundary: crossedBoundary,
+        )
+        if let play = decision.play {
+            renderer.play(play.url, at: play.position, force: play.force)
+        }
+        if decision.markApplied {
+            applied[renderer.debugID] = current.videoID
+        }
+        let target = CGDisplayIsActive(surfaceKey.displayID) == 0 ? .paused : PlaybackReducer.target(for: surface, in: state)
+        renderer.apply(target)
+    }
+
+    /// Previews follow the playlist's first item.
+    private func refreshPreviews(playlist: [MediaEntry], open: inout Set<String>) {
+        for surfaceKey in SurfaceRegistry.shared.surfaceKeys {
+            guard let surface = SurfaceRegistry.shared.surface(for: surfaceKey), surface.isPreview, let renderer = surface.renderer else { continue }
             for url in renderer.clockSample().openURLs {
                 open.insert(url.deletingLastPathComponent().lastPathComponent)
             }
@@ -251,19 +304,6 @@ final class PlaylistController: @unchecked Sendable {
             } else {
                 renderer.apply(.paused)
             }
-        }
-        applied = applied.filter { seenRenderers.contains($0.key) }
-        activeKeys = active; lastOpenIDs = open
-        powerSavingActive = state.pausedForPower
-        adaptTickRate(presenting: !active.isEmpty, displaysAsleep: state.displaysAsleep)
-        awake.update(
-            enabled: config.playlist.keepAwakeWhenLockedOnAC,
-            locked: state.screenLocked,
-            active: playing,
-            asleep: state.displaysAsleep,
-        )
-        if PlaylistCadence.shouldWriteRuntime(current: runtimeStructure(), written: lastWritten, lastWrite: lastSave, now: Date()) {
-            save()
         }
     }
     /// Reschedule the timer only when the rate actually changes.
