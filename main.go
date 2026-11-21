@@ -38,7 +38,7 @@ type application struct {
 	status        string
 	busy          bool
 	login         bool
-	thumbs        map[string]*ui.Bitmap
+	thumbs        *lru[string, *ui.Bitmap] // decoded library thumbnails, by media ID; see thumb
 	runtime       catalog.Runtime
 	displays      []platform.DisplayInfo
 	preview       *ui.VideoPlayer
@@ -59,7 +59,7 @@ func main() {
 	if !mygo.App.RequestSingleInstanceLock() {
 		return
 	}
-	app := &application{root: catalog.Root(), section: sectionLibrary, thumbs: map[string]*ui.Bitmap{}}
+	app := &application{root: catalog.Root(), section: sectionLibrary}
 	mygo.App.OnWindowAllClosed(func() {})
 	mygo.App.OnActivate(func(visible bool) {
 		if !visible && !(len(os.Args) > 2 && os.Args[1] == "--import") {
@@ -113,7 +113,6 @@ func main() {
 			}()
 			return
 		}
-		app.loadThumbnails()
 		app.reapLater()
 		if len(migrated) > 0 {
 			app.status = strings.Join(migrated, "；")
@@ -239,14 +238,28 @@ func (a *application) finish(err error) bool {
 	a.status = "已保存，壁纸会自动更新"
 	return true
 }
-func (a *application) loadThumbnails() {
-	for _, m := range a.config.Media {
-		if a.thumbs[m.ID] == nil {
-			if b, e := os.ReadFile(catalog.ThumbnailPath(a.root, m)); e == nil {
-				a.thumbs[m.ID], _ = ui.DecodeBitmap(b)
-			}
-		}
+
+// thumbCacheSize bounds the decoded thumbnails kept in memory, a library's
+// and the peers' each.
+const thumbCacheSize = 256
+
+// thumb is the thumbnail of library video id, nil when it has none: read
+// and decoded on first use, and kept while it is among the most recently
+// used. A miss is kept too, so a frame does not read the disk again. On the
+// main thread.
+func (a *application) thumb(id string) *ui.Bitmap {
+	if a.thumbs == nil {
+		a.thumbs = newLRU[string, *ui.Bitmap](thumbCacheSize)
 	}
+	if bm, ok := a.thumbs.Get(id); ok {
+		return bm
+	}
+	var bm *ui.Bitmap
+	if b, e := os.ReadFile(catalog.ThumbnailPath(a.root, catalog.MediaEntry{ID: id})); e == nil {
+		bm, _ = ui.DecodeBitmap(b)
+	}
+	a.thumbs.Put(id, bm)
+	return bm
 }
 
 // probe reads a video's size, rate and length and writes its thumbnail,
@@ -339,7 +352,6 @@ func (a *application) importPaths(paths []string) {
 		mygo.RunOnMain(func() {
 			saved := a.finish(a.addImported(added))
 			a.busy = false
-			a.loadThumbnails()
 			if saved {
 				a.status = fmt.Sprintf("已导入 %d 个视频", len(added))
 				if skipped > 0 {
@@ -431,8 +443,8 @@ func (a *application) deleteMedia(m catalog.MediaEntry) {
 					c.Media = slices.DeleteFunc(c.Media, func(e catalog.MediaEntry) bool { return e.ID == m.ID })
 					c.RemovedMediaIDs = append(c.RemovedMediaIDs, m.ID)
 				})
-				if _, ok := a.entry(m.ID); !ok {
-					delete(a.thumbs, m.ID)
+				if _, ok := a.entry(m.ID); !ok && a.thumbs != nil {
+					a.thumbs.Remove(m.ID)
 				}
 				if a.previewWindow != nil {
 					a.previewWindow.Close()

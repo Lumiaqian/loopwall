@@ -55,7 +55,7 @@ func TestVideoFiles(t *testing.T) {
 func TestDropImports(t *testing.T) {
 	dir := t.TempDir()
 	touch(t, dir, "notes.txt")
-	a := &application{root: t.TempDir(), host: &fakeHost{}, section: sectionSetting, thumbs: map[string]*ui.Bitmap{}}
+	a := &application{root: t.TempDir(), host: &fakeHost{}, section: sectionSetting}
 	var status string
 	tt := ui.NewTester(func(c *ui.Context) {
 		if a.status != "" {
