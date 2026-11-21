@@ -75,7 +75,8 @@ func (a *application) observeWallpaper(r catalog.Runtime, stuckSignals int64, no
 		}
 	}
 	silent := r.UpdatedAtUnix > 0 && now.Sub(time.Unix(int64(r.UpdatedAtUnix), 0)) > silentAfter
-	waiting := a.waitingDisplays(r) && len(r.ActiveDisplayKeys) == 0
+	// Power saving holds every display on purpose, so no active display is not a stall.
+	waiting := a.waitingDisplays(r) && len(r.ActiveDisplayKeys) == 0 && !r.PowerSavingActive
 	switch {
 	case !silent && !waiting:
 		a.stallSince = time.Time{}
