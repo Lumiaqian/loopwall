@@ -97,7 +97,7 @@ func (c Config) Validate() error {
 	}
 	ids := map[string]bool{}
 	for _, m := range c.Media {
-		if !safeID(m.ID) || ids[m.ID] || filepath.Base(m.Filename) != m.Filename || m.Filename == "." || strings.ContainsAny(m.Filename, "/\\") {
+		if !safeID(m.ID) || ids[m.ID] || filepath.Base(m.Filename) != m.Filename || m.Filename == "." || m.Filename == ".." || strings.ContainsAny(m.Filename, "/\\") {
 			return errors.New("invalid media identity or filename")
 		}
 		if m.Width <= 0 || m.Height <= 0 || m.DurationSeconds <= 0 || math.IsNaN(m.DurationSeconds) || math.IsInf(m.DurationSeconds, 0) || m.FrameRate <= 0 {
