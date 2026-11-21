@@ -117,7 +117,7 @@ func (a *application) backdrop(c *ui.Context, l *look, scale float32) {
 		overlay(ui.Box(c)).Background(solidBackground(t))
 		return
 	}
-	if bm := a.thumbs[a.ambientID()]; bm != nil {
+	if bm := a.thumb(a.ambientID()); bm != nil {
 		// Overscan so the blur does not fade in at the edges.
 		over := 2 * l.blur * scale
 		ui.Image(c, bm).Absolute().Top(-over).Left(-over).Right(-over).Bottom(-over).Fit(ui.Cover).Blur(l.blur * scale).Cache()
@@ -262,7 +262,7 @@ func (a *application) mediaCard(c *ui.Context, m catalog.MediaEntry) {
 		}
 		hovered := thumb.Hovered()
 		thumb.Children(func() {
-			if bm := a.thumbs[m.ID]; bm != nil {
+			if bm := a.thumb(m.ID); bm != nil {
 				ui.Image(c, bm).Fill().Fit(ui.Cover)
 			} else {
 				ui.Box(c).Fill().Center().TextColor(t.TextMuted).Children(func() { ui.Icon(c, iconFilm).FontSize(28) })
@@ -443,7 +443,7 @@ func (a *application) orderRow(c *ui.Context, i, n int, m catalog.MediaEntry) {
 	hovered := row.Hovered()
 	row.Children(func() {
 		ui.Text(c, fmt.Sprintf("%02d", i+1)).FontSize(12).FontWeight(600).TextColor(t.TextMuted).Width(20)
-		thumbBox(c, a.thumbs[m.ID], 64, 36, 5)
+		thumbBox(c, a.thumb(m.ID), 64, 36, 5)
 		ui.Column(c).Gap(1).Grow(1).MinWidth(0).Children(func() {
 			ui.Text(c, m.Name).FontWeight(600).SingleLine()
 			ui.Text(c, fmt.Sprintf("%s · %s", clock(m.DurationSeconds), resolution(m.Width, m.Height))).FontSize(11).TextColor(t.TextMuted)
@@ -470,7 +470,7 @@ func (a *application) displayCard(c *ui.Context, key, name string, builtIn bool)
 	current.fillContent(c, ui.Row(c.Key("disp-"+key)).Gap(14).Padding(12).Radius(16).Width(340).Grow(1)).Children(func() {
 		var bm *ui.Bitmap
 		if s.ok {
-			bm = a.thumbs[s.media.ID]
+			bm = a.thumb(s.media.ID)
 		}
 		thumbBox(c, bm, 128, 72, 7)
 		ui.Column(c).Gap(5).Grow(1).MinWidth(0).Children(func() {

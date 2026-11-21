@@ -116,7 +116,7 @@ func (a *application) remoteCard(c *ui.Context, p share.Peer, it share.Item) {
 	local, have := a.pulled(p, it.ID)
 	ui.Column(c.Key(key)).Width(236).Gap(8).Children(func() {
 		ui.Box(c).Size(236, 133).Radius(10).Clip().Background(t.Surface).Shadow(0, 1, 3, 0, ui.RGBA(0, 0, 0, 0.12)).Children(func() {
-			if bm := s.thumbs[key]; bm != nil {
+			if bm, _ := s.thumbs.Get(key); bm != nil {
 				ui.Image(c, bm).Fill().Fit(ui.Cover)
 			} else {
 				ui.Box(c).Fill().Center().TextColor(t.TextMuted).Children(func() { ui.Icon(c, iconFilm).FontSize(28) })

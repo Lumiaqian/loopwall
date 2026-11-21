@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"io"
 	"net"
-	"os"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -34,13 +33,13 @@ type sharing struct {
 
 	// browsing is read by the ticker, off the main thread.
 	browsing atomic.Bool
-	peers    []share.Peer          // the Macs found, this one left out
-	seen     map[string]time.Time  // when each was last found, by device
-	remotes  map[string]*remote    // what each peer shares, by its device
-	pulls    map[string]*pull      // downloads, by "device/id"
-	codes    map[string]*string    // pairing codes being typed, by device
-	pairing  map[string]bool       // pairings under way, by device
-	thumbs   map[string]*ui.Bitmap // peers' thumbnails, by "device/id"
+	peers    []share.Peer             // the Macs found, this one left out
+	seen     map[string]time.Time     // when each was last found, by device
+	remotes  map[string]*remote       // what each peer shares, by its device
+	pulls    map[string]*pull         // downloads, by "device/id"
+	codes    map[string]*string       // pairing codes being typed, by device
+	pairing  map[string]bool          // pairings under way, by device
+	thumbs   *lru[string, *ui.Bitmap] // peers' thumbnails, by "device/id"
 	// status is how publishing and browsing fare, as the ticker last read it.
 	status platform.SharingStatus
 }
@@ -105,7 +104,7 @@ func (a *application) setupSharing() {
 	}
 	a.share = &sharing{store: st, server: share.NewServer(a.root, st), client: share.NewClient(st, name), name: name,
 		remotes: map[string]*remote{}, pulls: map[string]*pull{}, codes: map[string]*string{}, seen: map[string]time.Time{}, pairing: map[string]bool{},
-		thumbs: map[string]*ui.Bitmap{}}
+		thumbs: newLRU[string, *ui.Bitmap](thumbCacheSize)}
 	if a.prefs.Share {
 		a.startSharing()
 	}
@@ -252,11 +251,40 @@ func (a *application) listRemote(p share.Peer) {
 		items, err := s.client.Library(ctx, p)
 		mygo.RunOnMain(func() {
 			r.items, r.err, r.loading = items, err, false
+			a.fetchThumbnails(p, items)
 			a.invalidate()
 		})
-		for _, it := range items {
-			key := p.Device + "/" + it.ID
+	}()
+}
+
+// thumbnailTimeout bounds each thumbnail's fetch, apart from the list's.
+const thumbnailTimeout = 15 * time.Second
+
+// missingThumbnails is the items of p whose thumbnails are not cached.
+func (s *sharing) missingThumbnails(p share.Peer, items []share.Item) []share.Item {
+	var missing []share.Item
+	for _, it := range items {
+		if !s.thumbs.Has(p.Device + "/" + it.ID) {
+			missing = append(missing, it)
+		}
+	}
+	return missing
+}
+
+// fetchThumbnails fetches the thumbnails of items that are not cached, one
+// after another in the background, each within its own timeout. On the
+// main thread.
+func (a *application) fetchThumbnails(p share.Peer, items []share.Item) {
+	s := a.share
+	missing := s.missingThumbnails(p, items)
+	if len(missing) == 0 {
+		return
+	}
+	go func() {
+		for _, it := range missing {
+			ctx, cancel := context.WithTimeout(context.Background(), thumbnailTimeout)
 			b, err := s.client.Thumbnail(ctx, p, it.ID)
+			cancel()
 			if err != nil {
 				continue
 			}
@@ -264,8 +292,9 @@ func (a *application) listRemote(p share.Peer) {
 			if err != nil {
 				continue
 			}
+			key := p.Device + "/" + it.ID
 			mygo.RunOnMain(func() {
-				s.thumbs[key] = bm
+				s.thumbs.Put(key, bm)
 				a.invalidate()
 			})
 		}
@@ -386,9 +415,6 @@ func (a *application) pullVideo(p share.Peer, it share.Item) {
 			if err := s.store.RecordImport(p.Device, it.ID, m.ID); err != nil {
 				a.status = err.Error()
 				return
-			}
-			if b, err := os.ReadFile(catalog.ThumbnailPath(a.root, m)); err == nil {
-				a.thumbs[m.ID], _ = ui.DecodeBitmap(b)
 			}
 			a.status = "已导入「" + m.Name + "」，并加入轮播"
 		})
