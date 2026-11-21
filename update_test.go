@@ -151,6 +151,29 @@ func TestRelaunchGuard(t *testing.T) {
 	}
 	_ = os.Remove(opened)
 
+	// A path with characters a regular expression reads (parentheses, +, .)
+	// is matched as it is.
+	odd := filepath.Join(dir, "Loopwall (1)+.app")
+	oddExe := filepath.Join(odd, "Contents", "MacOS", "Loopwall")
+	if err := os.MkdirAll(filepath.Dir(oddExe), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(oddExe, []byte("#!/bin/sh\nsleep \"$1\"\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	oddRunning := exec.Command(oddExe, "20")
+	if err := oddRunning.Start(); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = oddRunning.Process.Kill(); _ = oddRunning.Wait() })
+	if err := startRelaunchGuard(app("0.2"), odd, opener, 200*time.Millisecond, time.Minute); err != nil {
+		t.Fatal(err)
+	}
+	if got := wasOpened(2 * time.Second); got != "" {
+		t.Errorf("opened %q though it runs again", got)
+	}
+	_ = os.Remove(opened)
+
 	// The app keeps running past the guard's limit: the user quits it later.
 	if err := startRelaunchGuard(app("3"), gone, opener, 200*time.Millisecond, 600*time.Millisecond); err != nil {
 		t.Fatal(err)
