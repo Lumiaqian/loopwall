@@ -16,6 +16,9 @@ struct PlaylistSpec: Codable, Equatable, Sendable {
     var advanceMode = "end"
     var intervalSeconds = 60
     var keepAwakeWhenLockedOnAC = true
+    /// Pause on battery, in Low Power Mode or under serious thermal pressure. Optional
+    /// like `pins`; absent means off.
+    var powerSaving: Bool?
     /// Display UUID → the one video it plays instead of the playlist. Optional,
     /// so configurations written before it decode unchanged.
     var pins: [String: String]?
@@ -90,6 +93,8 @@ struct RuntimeState: Codable, Sendable {
     var activeDisplayKeys: [String] = []
     var openVideoIDs: [String] = []
     var keepAwakeActive = false
+    /// Playback is held by the power-saving setting. Absent means not.
+    var powerSavingActive: Bool?
     var errors: [String] = []
 }
 

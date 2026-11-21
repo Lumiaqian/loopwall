@@ -32,7 +32,7 @@ func TestContracts(t *testing.T) {
 		if e := AtomicJSON(path, c); e != nil {
 			t.Fatal(e)
 		}
-		r := Runtime{SchemaVersion: 1, AppliedRevision: 7, ActiveDisplayKeys: []string{}, OpenVideoIDs: []string{}, Errors: []string{}, Displays: []DisplayProgress{{DisplayKey: "display-A", VideoID: c.Media[1].ID, PositionSeconds: 61.5, ItemElapsedSeconds: 61.5, LastSeenUnix: 1_700_000_000}}}
+		r := Runtime{SchemaVersion: 1, AppliedRevision: 7, ActiveDisplayKeys: []string{}, OpenVideoIDs: []string{}, Errors: []string{}, PowerSavingActive: true, Displays: []DisplayProgress{{DisplayKey: "display-A", VideoID: c.Media[1].ID, PositionSeconds: 61.5, ItemElapsedSeconds: 61.5, LastSeenUnix: 1_700_000_000}}}
 		if e := AtomicJSON(filepath.Join(filepath.Dir(path), "go-runtime.json"), r); e != nil {
 			t.Fatal(e)
 		}
@@ -49,7 +49,7 @@ func TestContracts(t *testing.T) {
 		if e = got.Validate(); e != nil {
 			t.Fatal(e)
 		}
-		if got.Media[0].Name != c.Media[0].Name || got.Media[1].FrameRate != 29.97 || got.Playlist.IntervalSeconds != 60 ||
+		if got.Media[0].Name != c.Media[0].Name || got.Media[1].FrameRate != 29.97 || got.Playlist.IntervalSeconds != 60 || !got.Playlist.PowerSaving ||
 			len(got.Playlist.Pins) != 1 || got.Playlist.Pins["display-A"] != c.Media[2].ID {
 			t.Fatal("Swift round trip changed data")
 		}
@@ -59,7 +59,7 @@ func TestContracts(t *testing.T) {
 		if e != nil {
 			t.Fatal(e)
 		}
-		if len(r.Displays) != 1 || r.Displays[0].DisplayKey != "display-B" || r.Displays[0].PositionSeconds != 61.5 || r.Displays[0].LastSeenUnix != 1_700_000_123 {
+		if len(r.Displays) != 1 || r.Displays[0].DisplayKey != "display-B" || r.Displays[0].PositionSeconds != 61.5 || r.Displays[0].LastSeenUnix != 1_700_000_123 || !r.PowerSavingActive {
 			t.Fatal("Swift progress changed", r)
 		}
 	}
