@@ -11,8 +11,7 @@ final class PlaylistController: @unchecked Sendable {
     private var sessions: [String: DisplayProgress] = [:]
     private var displayKeys: [UInt32: String] = [:]
     private var rejected = Set<String>()
-    private var clocks: [String: PresentationClock] = [:]
-    private var leaders: [String: Int] = [:]
+    private var leaderStates: [String: PlaylistTick.LeaderState] = [:]
     private var persistedRule: String?
     private var applied: [Int: String] = [:]
     private var timer: (any DispatchSourceTimer)?
@@ -98,8 +97,11 @@ final class PlaylistController: @unchecked Sendable {
         for key in sessions.keys {
             PlaylistTimeline.reconcile(&sessions[key]!, oldOrder: old.playlist.videoIDs, items: items(for: key), resetElapsed: ruleChanged)
         }
-        if ruleChanged {
-            clocks.removeAll()
+        for key in leaderStates.keys {
+            leaderStates[key]?.retryRequested = true
+            if ruleChanged {
+                leaderStates[key]?.clock = nil
+            }
         }
     }
     private func refreshDisplays() {
@@ -154,36 +156,27 @@ final class PlaylistController: @unchecked Sendable {
                 active.insert(key)
                 playing = playing || !playable.isEmpty
             }
-            if let leader, !playable.isEmpty {
-                let sample = leader.clockSample()
-                if sample.failed {
-                    reject(progress.videoID, message: "原生解码失败")
-                    playable = items(for: key)
-                    PlaylistTimeline.reconcile(&progress, oldOrder: config.playlist.videoIDs, items: playable, resetElapsed: true)
-                    clocks[key] = nil
-                } else if sample.ready, sample.url == VideoLibrary.shared.videoURL(for: progress.videoID) {
-                    let mediaDuration = config.media.first { $0.id == progress.videoID }?.durationSeconds ?? 1
-                    let actual = sample.seconds.truncatingRemainder(dividingBy: mediaDuration)
-                    let distance = abs(actual - progress.positionSeconds)
-                    if leaders[key] != leader.debugID, min(distance, mediaDuration - distance) > 0.25,
-                       let url = VideoLibrary.shared.videoURL(for: progress.videoID) {
-                        leader.play(url, at: progress.positionSeconds, force: true)
-                        clocks[key] = nil
-                    } else {
-                        var clock = clocks[key] ?? PresentationClock()
-                        let delta = clock.delta(rendererID: leader.debugID, epoch: sample.epoch, seconds: sample.seconds)
-                        clocks[key] = clock
-                        crossedBoundary = PlaylistTimeline.advance(&progress, seconds: delta, items: playable, rule: config.playlist)
-                        if crossedBoundary {
-                            lastSave = .distantPast
-                        }
-                    }
-                    leaders[key] = leader.debugID
-                } else {
-                    clocks[key] = nil
-                }
-            } else {
-                clocks[key] = nil; leaders[key] = nil
+            var leaderState = leaderStates[key] ?? PlaylistTick.LeaderState()
+            let outcome = PlaylistTick.leaderStep(
+                progress: &progress,
+                playable: playable,
+                rule: config.playlist,
+                leader: leader.map { PlaylistTick.Leader(id: $0.debugID, sample: $0.clockSample().rendererSample) },
+                state: &leaderState,
+                urlFor: { VideoLibrary.shared.videoURL(for: $0) },
+            )
+            leaderStates[key] = leaderState
+            if let id = outcome.rejectID {
+                reject(id, message: "原生解码失败")
+                playable = items(for: key)
+                PlaylistTimeline.reconcile(&progress, oldOrder: config.playlist.videoIDs, items: playable, resetElapsed: true)
+            }
+            if let leader, let play = outcome.resync ?? outcome.retry {
+                leader.play(play.url, at: play.position, force: play.force)
+            }
+            crossedBoundary = outcome.crossedBoundary
+            if crossedBoundary {
+                lastSave = .distantPast
             }
 
             sessions[key] = progress
@@ -204,10 +197,17 @@ final class PlaylistController: @unchecked Sendable {
                 }
                 PlaylistTimeline.reconcile(&sessions[key]!, oldOrder: config.playlist.videoIDs, items: playable, resetElapsed: false)
                 guard let current = sessions[key], let url = VideoLibrary.shared.videoURL(for: current.videoID) else { continue }
-                if crossedBoundary || applied[renderer.debugID] != current.videoID {
-                    if crossedBoundary || sample.url != url {
-                        renderer.play(url, at: current.positionSeconds, force: crossedBoundary)
-                    }
+                let decision = PlaylistTick.surfaceStep(
+                    current: current,
+                    url: url,
+                    sample: sample.rendererSample,
+                    applied: applied[renderer.debugID],
+                    crossedBoundary: crossedBoundary,
+                )
+                if let play = decision.play {
+                    renderer.play(play.url, at: play.position, force: play.force)
+                }
+                if decision.markApplied {
                     applied[renderer.debugID] = current.videoID
                 }
                 let target = CGDisplayIsActive(surfaceKey.displayID) == 0 ? .paused : PlaybackReducer.target(for: surface, in: state)

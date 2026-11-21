@@ -40,7 +40,11 @@ final class VideoRenderer: @unchecked Sendable {
     private var startPosition: Double
     private var duration: Double
     private var clockEpoch = 0
-    private var failed = false
+    /// The video this renderer could not open or keep decoding; cleared when a frame shows again.
+    private var failedURL: URL?
+    private var failureSerial = 0
+    private var failures = RenderFailureCounter()
+    private static let failureSerials = OSAllocatedUnfairLock(initialState: 0)
 
     struct ClockSample: Sendable {
         let url: URL
@@ -48,7 +52,12 @@ final class VideoRenderer: @unchecked Sendable {
         let openURLs: [URL]
         let epoch: Int
         let ready: Bool
-        let failed: Bool
+        let failedURL: URL?
+        let failureSerial: Int
+
+        var rendererSample: RendererSample {
+            RendererSample(url: url, seconds: seconds, epoch: epoch, ready: ready, failedURL: failedURL, failureSerial: failureSerial)
+        }
     }
     func clockSample() -> ClockSample {
         queue.sync {
@@ -58,7 +67,8 @@ final class VideoRenderer: @unchecked Sendable {
                 openURLs: [asset.url] + [currentReader, nextReader].compactMap { ($0?.asset as? AVURLAsset)?.url },
                 epoch: clockEpoch,
                 ready: hasStarted && !flushInFlight && isRunning,
-                failed: failed,
+                failedURL: failedURL,
+                failureSerial: failureSerial,
             )
         }
     }
@@ -228,7 +238,7 @@ final class VideoRenderer: @unchecked Sendable {
         let output = AVAssetReaderTrackOutput(track: videoTrack, outputSettings: nil)
         output.alwaysCopiesSampleData = false
         reader.add(output)
-        guard reader.startReading() else { failed = true; firstFrameShown(); return }
+        guard reader.startReading() else { recordFailure(asset.url); firstFrameShown(); return }
         hasStarted = true
 
         // Reset the timebase before the first enqueue so the frame isn't seen as late.
@@ -244,8 +254,9 @@ final class VideoRenderer: @unchecked Sendable {
             CATransaction.commit()
             CATransaction.flush()
         } else {
-            failed = true; firstFrameShown(); return
+            recordFailure(asset.url); firstFrameShown(); return
         }
+        presented()
 
         currentReader = reader
         currentOutput = output
@@ -278,15 +289,27 @@ final class VideoRenderer: @unchecked Sendable {
         traceLog("  [resize #\(debugID)] → \(destSize) @\(scale)x")
     }
 
+    /// A shown first frame means the asset decodes: forget earlier failures.
+    private func presented() {
+        failedURL = nil
+        failures.presented()
+    }
+
+    private func recordFailure(_ url: URL) {
+        failedURL = url
+        failureSerial = Self.failureSerials.withLock { $0 += 1; return $0 }
+    }
+
     /// Switch in place and retain the displayed frame until the new decoder is ready.
     /// force is used only when a different surface takes over this display's session.
     func play(_ url: URL, at position: Double, force: Bool = false) {
         queue.async { [self] in
             guard isRunning, force || asset.url != url else { return }
             let newAsset = AVURLAsset(url: url)
-            guard let (track, length) = Self.loadVideoTrackBlocking(newAsset) else { failed = true; return }
-            guard length.isFinite, length > 0 else { failed = true; return }
-            failed = false
+            // Record the requested URL: `asset` is still the old video when this fails.
+            guard let (track, length) = Self.loadVideoTrackBlocking(newAsset) else { recordFailure(url); return }
+            guard length.isFinite, length > 0 else { recordFailure(url); return }
+            failedURL = nil
             asset = newAsset; videoTrack = track; duration = length
             startPosition = max(0, position).truncatingRemainder(dividingBy: duration)
             restartWithCurrentAsset()
@@ -504,6 +527,7 @@ final class VideoRenderer: @unchecked Sendable {
                     ? CMTimeAdd(pts, dur)
                     : CMTimeAdd(pts, CMTime(value: 1, timescale: 60))
             }
+            failedURL = nil
         }
 
         prepareNextReader()
@@ -571,7 +595,7 @@ final class VideoRenderer: @unchecked Sendable {
                 let output = AVAssetReaderTrackOutput(track: videoTrack, outputSettings: nil)
                 output.alwaysCopiesSampleData = false
                 reader.add(output)
-                guard reader.startReading() else { failed = true; return }
+                guard reader.startReading() else { recordFailure(asset.url); return }
                 currentReader = reader
                 currentOutput = output
 
@@ -596,8 +620,9 @@ final class VideoRenderer: @unchecked Sendable {
                             : CMTimeAdd(pts, CMTime(value: 1, timescale: 60))
                     }
                 } else {
-                    failed = true; return
+                    recordFailure(asset.url); return
                 }
+                presented()
 
                 CMTimebaseSetRate(timebase, rate: 1.0)
                 if isPaused {
@@ -611,6 +636,21 @@ final class VideoRenderer: @unchecked Sendable {
                 feedFromCurrentReader()
             }
         }
+    }
+
+    /// Rebuild after a `.failed` renderer. If rebuilding has not helped (see
+    /// `RenderFailureCounter`), report the failure and pause instead of looping.
+    private func recoverOrGiveUp() {
+        guard failures.failed(asset.url) else { return recoverFromError() }
+        recordFailure(asset.url)
+        currentPolicy = .paused
+        pause()
+    }
+
+    /// Reset everything and restart playback from scratch after a decoder error.
+    private func recoverFromError() {
+        recreatePlayback()
+        CMTimebaseSetRate(timebase, rate: isPaused ? 0.0 : 1.0)
     }
 
     // MARK: - Preloaded Loop Reader
@@ -643,6 +683,8 @@ final class VideoRenderer: @unchecked Sendable {
 
         // Advance offset so the next loop's DTS/PTS continue the timeline.
         ptsOffset = lastEnqueuedEnd
+        // A whole loop played without a decoder failure.
+        failures.presented()
 
         if let nr = nextReader, let no = nextOutput {
             if let nrAsset = nr.asset as? AVURLAsset, nrAsset.url != asset.url {
@@ -685,12 +727,10 @@ final class VideoRenderer: @unchecked Sendable {
             // Unrecoverable failure — full reset.
             // Dispatch async: requestMediaDataWhenReady is not reentrant.
             if renderer.status == .failed {
-                failed = true
                 extensionLog("  [Renderer] Status failed: \(renderer.error?.localizedDescription ?? "unknown"), recovering")
                 renderer.stopRequestingMediaData()
                 queue.async { [weak self] in
-                    self?.currentPolicy = .paused
-                    self?.pause()
+                    self?.recoverOrGiveUp()
                 }
                 return
             }
@@ -729,7 +769,7 @@ final class VideoRenderer: @unchecked Sendable {
                     }
                     renderer.stopRequestingMediaData()
                     if currentReader?.status == .failed {
-                        failed = true; return
+                        recordFailure(asset.url); return
                     }
                     queue.async { [weak self] in
                         self?.swapToNextReader()
