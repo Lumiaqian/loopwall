@@ -1,7 +1,12 @@
 package main
 
 import (
+	"log"
+	"os"
 	"os/exec"
+	"path/filepath"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/Lumiaqian/loopwall/internal/catalog"
@@ -24,7 +29,31 @@ const (
 	// repairSettle is how long a repair takes to show, during which the app
 	// neither offers nor makes another.
 	repairSettle = 30 * time.Second
+	// stampMaxAge and stampSkew bound how far the extension's recovery stamp
+	// may lie behind or ahead of now for a stuck signal to be trusted.
+	stampMaxAge = 10 * time.Second
+	stampSkew   = time.Second
 )
+
+// recoveryStampName is the file the extension writes, as Unix seconds,
+// immediately before it posts the stuck notification.
+const recoveryStampName = "loopwall-last-recovery"
+
+// recentRecoveryStamp reports whether the extension stamped a recovery
+// just now. The Darwin notification carries no sender, so any local process
+// could post it; only the extension, in its container, can write the stamp.
+func recentRecoveryStamp(root string, now time.Time) bool {
+	b, err := os.ReadFile(filepath.Join(root, recoveryStampName))
+	if err != nil {
+		return false
+	}
+	sec, err := strconv.ParseFloat(strings.TrimSpace(string(b)), 64)
+	if err != nil {
+		return false
+	}
+	age := now.Sub(time.Unix(0, int64(sec*float64(time.Second))))
+	return age >= -stampSkew && age <= stampMaxAge
+}
 
 // restartAgent restarts WallpaperAgent, which launchd relaunches; tests
 // replace it.
@@ -35,7 +64,13 @@ var restartAgent = func() error { return exec.Command("/usr/bin/killall", "-TERM
 func (a *application) observeWallpaper(r catalog.Runtime, stuckSignals int64, now time.Time) {
 	if stuckSignals > a.stuckSignals {
 		a.stuckSignals = stuckSignals
-		a.repairWallpaper("壁纸扩展报告墙纸服务卡住，已自动重建", now)
+		// Ported from upstream Phosphene c6e8118: act only with the
+		// extension's own fresh stamp.
+		if recentRecoveryStamp(a.root, now) {
+			a.repairWallpaper("壁纸扩展报告墙纸服务卡住，已自动重建", now)
+		} else {
+			log.Printf("recovery: ignoring a stuck signal without a fresh extension stamp")
+		}
 	}
 	silent := r.UpdatedAtUnix > 0 && now.Sub(time.Unix(int64(r.UpdatedAtUnix), 0)) > silentAfter
 	waiting := len(r.Displays) > 0 && len(r.ActiveDisplayKeys) == 0

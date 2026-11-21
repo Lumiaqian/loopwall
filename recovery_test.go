@@ -1,6 +1,9 @@
 package main
 
 import (
+	"os"
+	"path/filepath"
+	"strconv"
 	"testing"
 	"time"
 
@@ -17,7 +20,7 @@ func TestWallpaperRecovery(t *testing.T) {
 	report := func(s int, active ...string) catalog.Runtime {
 		return catalog.Runtime{UpdatedAtUnix: float64(at(s).Unix()), Displays: []catalog.DisplayProgress{{DisplayKey: "A"}, {DisplayKey: "B"}}, ActiveDisplayKeys: active}
 	}
-	a := &application{}
+	a := &application{root: t.TempDir()}
 
 	// Playing: nothing offered.
 	a.observeWallpaper(report(0, "A", "B"), 0, at(0))
@@ -53,10 +56,56 @@ func TestWallpaperRecovery(t *testing.T) {
 	if restarts != 1 || a.wallpaperStalled(at(118)) {
 		t.Fatalf("after a repair: restarts=%d stalled=%v", restarts, a.wallpaperStalled(at(118)))
 	}
-	// The extension calls for help: repaired at once, once per call.
+	// The extension calls for help (stamping first): repaired at once, once per call.
+	stamp(t, a.root, at(200))
 	a.observeWallpaper(report(200, "A", "B"), 1, at(200))
 	a.observeWallpaper(report(202, "A", "B"), 1, at(202))
 	if restarts != 2 {
 		t.Fatalf("call for help: restarts=%d, want 2", restarts)
 	}
 }
+
+func stamp(t *testing.T, root string, at time.Time) {
+	t.Helper()
+	text := strconv.FormatFloat(float64(at.UnixNano())/1e9, 'f', -1, 64)
+	if err := os.WriteFile(filepath.Join(root, recoveryStampName), []byte(text), 0o600); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// A stuck signal is a Darwin notification any process can post; only one
+// with the extension's fresh stamp behind it repairs.
+func TestStuckSignalNeedsFreshStamp(t *testing.T) {
+	restarts, real := 0, restartAgent
+	restartAgent = func() error { restarts++; return nil }
+	t.Cleanup(func() { restartAgent = real })
+
+	now := time.Unix(2_000_000, 0)
+	cases := []struct {
+		name  string
+		stamp *time.Time
+		want  int
+	}{
+		{"no stamp", nil, 0},
+		{"stale stamp", ptr(now.Add(-11 * time.Second)), 0},
+		{"stamp from the future", ptr(now.Add(2 * time.Second)), 0},
+		{"fresh stamp", ptr(now.Add(-3 * time.Second)), 1},
+		{"slightly ahead", ptr(now.Add(500 * time.Millisecond)), 1},
+	}
+	for _, c := range cases {
+		restarts = 0
+		a := &application{root: t.TempDir()}
+		if c.stamp != nil {
+			stamp(t, a.root, *c.stamp)
+		}
+		a.observeWallpaper(catalog.Runtime{}, 1, now)
+		if restarts != c.want {
+			t.Errorf("%s: restarts=%d, want %d", c.name, restarts, c.want)
+		}
+		if a.stuckSignals != 1 {
+			t.Errorf("%s: signal not recorded", c.name)
+		}
+	}
+}
+
+func ptr[T any](v T) *T { return &v }
