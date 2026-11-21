@@ -97,8 +97,9 @@ final class PlaylistController: @unchecked Sendable {
         for key in sessions.keys {
             PlaylistTimeline.reconcile(&sessions[key]!, oldOrder: old.playlist.videoIDs, items: items(for: key), resetElapsed: ruleChanged)
         }
-        if ruleChanged {
-            for key in leaderStates.keys {
+        for key in leaderStates.keys {
+            leaderStates[key]?.retryRequested = true
+            if ruleChanged {
                 leaderStates[key]?.clock = nil
             }
         }
@@ -170,7 +171,7 @@ final class PlaylistController: @unchecked Sendable {
                 playable = items(for: key)
                 PlaylistTimeline.reconcile(&progress, oldOrder: config.playlist.videoIDs, items: playable, resetElapsed: true)
             }
-            if let leader, let play = outcome.resync {
+            if let leader, let play = outcome.resync ?? outcome.retry {
                 leader.play(play.url, at: play.position, force: play.force)
             }
             crossedBoundary = outcome.crossedBoundary
