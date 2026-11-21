@@ -57,6 +57,29 @@ struct DisplayProgress: Codable, Equatable, Sendable {
     var videoID: String
     var positionSeconds: Double = 0
     var itemElapsedSeconds: Double = 0
+    /// When this display was last presenting (Unix seconds). Optional, so files written
+    /// before it decode unchanged; see `SessionPruning`.
+    var lastSeenUnix: Double?
+}
+
+/// runtime.json keeps one session per display UUID, so it grows with every monitor ever
+/// connected. A session whose display has not been active for `retention` is dropped.
+enum SessionPruning {
+    static let retention: TimeInterval = 30 * 24 * 3_600
+
+    /// Stamp the active sessions, start the clock on sessions that have no stamp yet,
+    /// and remove those not seen within `retention`.
+    static func prune(_ sessions: inout [String: DisplayProgress], active: Set<String>, now: Double) {
+        for key in Array(sessions.keys) {
+            guard var progress = sessions[key] else { continue }
+            if active.contains(key) || progress.lastSeenUnix == nil {
+                progress.lastSeenUnix = now
+                sessions[key] = progress
+            } else if let seen = progress.lastSeenUnix, now - seen > retention {
+                sessions[key] = nil
+            }
+        }
+    }
 }
 struct RuntimeState: Codable, Sendable {
     var schemaVersion = 1

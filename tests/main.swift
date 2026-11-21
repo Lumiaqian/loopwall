@@ -75,9 +75,11 @@ print("PASS: presentation-clock epochs and surface reactivation")
 let fixtureDirectory = URL(fileURLWithPath: CommandLine.arguments[1]).deletingLastPathComponent()
 let goRuntime = try JSONDecoder().decode(RuntimeState.self, from: Data(contentsOf: fixtureDirectory.appendingPathComponent("go-runtime.json")))
 require(goRuntime.displays[0].displayKey == "display-A" && goRuntime.displays[0].positionSeconds == 61.5, "Go runtime is read in seconds")
+require(goRuntime.displays[0].lastSeenUnix == 1_700_000_000, "Go lastSeenUnix is read")
 var swiftRuntime = RuntimeState()
 var savedDisplay = b
 savedDisplay.displayKey = "display-B"
+savedDisplay.lastSeenUnix = 1_700_000_123
 swiftRuntime.displays = [savedDisplay]
 try JSONEncoder().encode(swiftRuntime).write(to: fixtureDirectory.appendingPathComponent("runtime.json"), options: .atomic)
 let display = CGSize(width: 2_560, height: 1_440)
@@ -230,3 +232,99 @@ tickState = PlaylistTick.LeaderState()
 tickOut = leaderTick(&tickProgress, tickSample(tickA, seconds: 0, failedOn: tickB, serial: 5), state: &tickState)
 require(tickOut.rejectID == nil && tickOut.retry == nil, "a failure of another URL does not reject the current video")
 print("PASS: renderer failure recovery decisions")
+
+// Media index: the tick reads cached URLs; only `refresh` touches the file system.
+var statCount = 0
+var presentFiles: Set<String> = [tickA.id, tickB.id]
+let statURL: (MediaEntry) -> URL? = { entry in
+    statCount += 1
+    return presentFiles.contains(entry.id) ? tickURLs[entry.id] : nil
+}
+let indexStart = Date(timeIntervalSince1970: 1_000)
+var mediaIndex = MediaIndex(media: [tickA, tickB], now: indexStart, urlFor: statURL)
+require(statCount == 2, "building the index stats each file once")
+for _ in 0 ..< 100 {
+    require(mediaIndex.url(for: tickA.id) == tickURLs[tickA.id] && mediaIndex.entry(for: tickB.id) == tickB, "lookups come from the cache")
+}
+require(statCount == 2, "lookups never stat")
+require(mediaIndex.url(for: "missing") == nil && mediaIndex.entry(for: "missing") == nil, "unknown IDs are absent")
+require(!mediaIndex.isStale(now: indexStart.addingTimeInterval(9.9)), "the index is fresh inside the recheck interval")
+require(mediaIndex.isStale(now: indexStart.addingTimeInterval(10)), "the index goes stale after the recheck interval")
+presentFiles.remove(tickB.id)
+require(mediaIndex.url(for: tickB.id) != nil, "a deleted file stays cached until the next refresh")
+require(mediaIndex.refresh(now: indexStart.addingTimeInterval(10), urlFor: statURL), "refresh reports the change")
+require(mediaIndex.url(for: tickB.id) == nil && mediaIndex.url(for: tickA.id) != nil, "refresh notices a vanished file")
+require(!mediaIndex.isStale(now: indexStart.addingTimeInterval(11)), "refresh restarts the interval")
+presentFiles.insert(tickB.id)
+require(mediaIndex.refresh(now: indexStart.addingTimeInterval(20), urlFor: statURL) && mediaIndex.url(for: tickB.id) != nil, "refresh notices a file that appears")
+require(!mediaIndex.refresh(now: indexStart.addingTimeInterval(30), urlFor: statURL), "an unchanged refresh reports no change")
+print("PASS: media index")
+
+/// Display list refresh: by event, with a slow safety net.
+let refreshedAt = Date(timeIntervalSince1970: 5_000)
+require(!PlaylistCadence.displayRefreshDue(dirty: false, lastRefresh: refreshedAt, now: refreshedAt.addingTimeInterval(0.1)), "a clean display list is not re-read every tick")
+require(!PlaylistCadence.displayRefreshDue(dirty: false, lastRefresh: refreshedAt, now: refreshedAt.addingTimeInterval(4.9)), "a clean display list waits for the safety interval")
+require(PlaylistCadence.displayRefreshDue(dirty: true, lastRefresh: refreshedAt, now: refreshedAt.addingTimeInterval(0.1)), "a reconfiguration refreshes at once")
+require(PlaylistCadence.displayRefreshDue(dirty: false, lastRefresh: refreshedAt, now: refreshedAt.addingTimeInterval(5)), "the safety interval refreshes a clean list")
+print("PASS: display refresh cadence")
+
+// Adaptive tick: 10 Hz only while a desktop surface is presented on awake displays.
+require(PlaylistCadence.tickMilliseconds(presenting: true, displaysAsleep: false) == 100, "a presented surface ticks at 10 Hz")
+require(PlaylistCadence.tickMilliseconds(presenting: false, displaysAsleep: false) == 1_000, "nothing presented ticks at 1 Hz")
+require(PlaylistCadence.tickMilliseconds(presenting: true, displaysAsleep: true) == 1_000, "asleep displays tick at 1 Hz")
+require(PlaylistCadence.tickMilliseconds(presenting: false, displaysAsleep: true) == 1_000, "nothing presented and asleep ticks at 1 Hz")
+print("PASS: adaptive tick rate")
+
+/// runtime.json writes: structural changes at once, positions on a 10 s heartbeat.
+let baseStructure = PlaylistCadence.RuntimeStructure(
+    appliedRevision: 3, activeDisplayKeys: ["A"], openVideoIDs: ["x"], videoIDs: ["A": "x"], errors: [], keepAwakeActive: false,
+)
+let wroteAt = Date(timeIntervalSince1970: 9_000)
+func writeDue(_ current: PlaylistCadence.RuntimeStructure, after seconds: Double, written: PlaylistCadence.RuntimeStructure? = baseStructure) -> Bool {
+    PlaylistCadence.shouldWriteRuntime(current: current, written: written, lastWrite: wroteAt, now: wroteAt.addingTimeInterval(seconds))
+}
+require(!writeDue(baseStructure, after: 0.1) && !writeDue(baseStructure, after: 9.9), "an unchanged report waits for the heartbeat")
+require(writeDue(baseStructure, after: 10), "the heartbeat rewrites positions every 10 s")
+require(writeDue(baseStructure, after: 0.1, written: nil), "the first report is written at once")
+var changedStructure = baseStructure
+changedStructure.appliedRevision = 4
+require(writeDue(changedStructure, after: 0.1), "a newly applied revision is written at once")
+changedStructure = baseStructure; changedStructure.activeDisplayKeys = []
+require(writeDue(changedStructure, after: 0.1), "a display going inactive is written at once")
+changedStructure = baseStructure; changedStructure.openVideoIDs = []
+require(writeDue(changedStructure, after: 0.1), "a released reader is written at once (it unblocks deletion)")
+changedStructure = baseStructure; changedStructure.videoIDs["A"] = "y"
+require(writeDue(changedStructure, after: 0.1), "a display switching video is written at once")
+changedStructure = baseStructure; changedStructure.errors = ["e"]
+require(writeDue(changedStructure, after: 0.1), "a new error is written at once")
+changedStructure = baseStructure; changedStructure.keepAwakeActive = true
+require(writeDue(changedStructure, after: 0.1), "a keep-awake change is written at once")
+print("PASS: runtime write policy")
+
+/// Session pruning: a display unseen for 30 days is forgotten; legacy files age from now.
+let pruneNow = 2_000_000_000.0
+let thirtyOneDays = 31.0 * 24 * 3_600
+var pruned: [String: DisplayProgress] = [
+    "active": DisplayProgress(displayKey: "active", videoID: "v", lastSeenUnix: pruneNow - thirtyOneDays),
+    "recent": DisplayProgress(displayKey: "recent", videoID: "v", lastSeenUnix: pruneNow - 29 * 24 * 3_600),
+    "old": DisplayProgress(displayKey: "old", videoID: "v", lastSeenUnix: pruneNow - thirtyOneDays),
+    "legacy": DisplayProgress(displayKey: "legacy", videoID: "v"),
+]
+SessionPruning.prune(&pruned, active: ["active"], now: pruneNow)
+require(pruned["active"]?.lastSeenUnix == pruneNow, "an active session is stamped, however old its last stamp")
+require(pruned["recent"]?.lastSeenUnix == pruneNow - 29 * 24 * 3_600, "a session inside the retention window is kept untouched")
+require(pruned["old"] == nil, "a session unseen for over 30 days is dropped")
+require(pruned["legacy"]?.lastSeenUnix == pruneNow, "a session from an older file starts aging from now")
+SessionPruning.prune(&pruned, active: [], now: pruneNow + 29 * 24 * 3_600)
+require(pruned["legacy"] != nil, "a legacy session survives its first 30 days")
+SessionPruning.prune(&pruned, active: [], now: pruneNow + thirtyOneDays)
+require(pruned["legacy"] == nil && pruned["active"] == nil && pruned["recent"] == nil, "idle sessions age out")
+let legacyJSON = Data(#"{"displayKey":"d","videoID":"v","positionSeconds":1,"itemElapsedSeconds":2}"#.utf8)
+let legacyDecoded = try JSONDecoder().decode(DisplayProgress.self, from: legacyJSON)
+require(legacyDecoded.lastSeenUnix == nil, "files without lastSeenUnix still decode")
+print("PASS: session pruning")
+
+// Fail-open visibility: no line until a connection was accepted unverified.
+require(PlaylistCadence.unverifiedCallerError(count: 0) == nil, "no line while every caller was verified")
+require(PlaylistCadence.unverifiedCallerError(count: 3) == "有 3 次连接无法验证来源，已放行（系统接口变化？）", "unverified acceptances are reported with their count")
+print("PASS: unverified caller report")

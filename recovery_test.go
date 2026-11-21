@@ -109,3 +109,15 @@ func TestStuckSignalNeedsFreshStamp(t *testing.T) {
 }
 
 func ptr[T any](v T) *T { return &v }
+
+func TestRuntimeFreshAllowsHeartbeatGap(t *testing.T) {
+	a := &application{}
+	a.runtime.UpdatedAtUnix = float64(time.Now().Add(-(catalog.RuntimeHeartbeat + 8*time.Second)).Unix())
+	if !a.runtimeFresh() {
+		t.Fatal("a report one heartbeat plus a late write old counts as stale")
+	}
+	a.runtime.UpdatedAtUnix = float64(time.Now().Add(-(catalog.RuntimeStaleAfter + 10*time.Second)).Unix())
+	if a.runtimeFresh() {
+		t.Fatal("a report past the stale limit counts as fresh")
+	}
+}

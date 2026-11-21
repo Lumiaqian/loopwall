@@ -85,6 +85,7 @@ enum DisplayReconfiguration {
 
     private static func schedule(displayID: CGDirectDisplayID, flags: CGDisplayChangeSummaryFlags) {
         traceLog("  [geometry] display \(displayID) reconfigured (flags 0x\(String(flags.rawValue, radix: 16)))")
+        PlaylistController.shared.displaysChanged()
         Lifecycle.queue.async {
             pendingPass?.cancel()
             let pass = DispatchWorkItem {

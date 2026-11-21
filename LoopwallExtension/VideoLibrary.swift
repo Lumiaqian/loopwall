@@ -24,7 +24,10 @@ final class VideoLibrary: Sendable {
         videosDir.appendingPathComponent(entry.id).appendingPathComponent(entry.filename)
     }
     func videoURL(for id: String) -> URL? {
-        guard let entry = entry(for: id) else { return nil }
+        entry(for: id).flatMap(availableURL)
+    }
+    /// The entry's file, or nil when it is outside the library or missing on disk (one stat).
+    func availableURL(for entry: MediaEntry) -> URL? {
         let url = videoURL(for: entry)
         return PathSafety.contained(url, in: videosDir) && FileManager.default.fileExists(atPath: url.path) ? url : nil
     }
