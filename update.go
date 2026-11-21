@@ -132,7 +132,10 @@ while kill -0 "$pid" 2>/dev/null; do
 	sleep 0.2
 done
 sleep "$delay"
-pgrep -qf "$app/Contents/MacOS/" || exec "$opener" "$app"
+# A literal match: a path has characters a regular expression would read.
+ps -axww -o command= | { while IFS= read -r c; do
+	case "$c" in *"$app/Contents/MacOS/"*) exit 0;; esac
+done; exit 1; } || exec "$opener" "$app"
 `
 
 // startRelaunchGuard runs relaunchGuard for the app of pid at bundle,
