@@ -26,24 +26,41 @@ final class VideoRenderer: @unchecked Sendable {
     private let renderer: AVSampleBufferVideoRenderer
     private let queue = DispatchQueue(label: "video-renderer", qos: .userInitiated)
 
-    // Everything below is confined to `queue`.
-    private var asset: AVURLAsset
+    /// Everything below is confined to `queue`. The properties the playlist reads through
+    /// `clockSample()` publish a snapshot when they change (see `publishClock`).
+    private var asset: AVURLAsset {
+        didSet { publishClock() }
+    }
     private var videoTrack: AVAssetTrack
-    private var isRunning = true
+    private var isRunning = true {
+        didSet { publishClock() }
+    }
     /// `start()` has built the pipeline. Before that a target only sets the logical
     /// state, which `start()` then honors.
-    private var hasStarted = false
+    private var hasStarted = false {
+        didSet { publishClock() }
+    }
     /// Only system lifecycle and an empty playlist hold the presentation clock.
     private var isPaused = false
     private var currentPolicy: PlaybackPolicy = .full
     private var deepPauseTimer: (any DispatchSourceTimer)?
     private var startPosition: Double
     private var duration: Double
-    private var clockEpoch = 0
+    private var clockEpoch = 0 {
+        didSet { publishClock() }
+    }
     /// The video this renderer could not open or keep decoding; cleared when a frame shows again.
-    private var failedURL: URL?
-    private var failureSerial = 0
+    private var failedURL: URL? {
+        didSet { publishClock() }
+    }
+    private var failureSerial = 0 {
+        didSet { publishClock() }
+    }
     private var failures = RenderFailureCounter()
+    /// Latest `play` request, the video it is loading (nil when none is pending) and that load.
+    private var playToken = 0
+    private var pendingURL: URL?
+    private var loadTask: Task<Void, Never>?
     private static let failureSerials = OSAllocatedUnfairLock(initialState: 0)
 
     struct ClockSample: Sendable {
@@ -59,26 +76,59 @@ final class VideoRenderer: @unchecked Sendable {
             RendererSample(url: url, seconds: seconds, epoch: epoch, ready: ready, failedURL: failedURL, failureSerial: failureSerial)
         }
     }
+    /// What `clockSample()` serves. The renderer queue can be busy for a long time (a
+    /// first-frame decode), and the playlist queue, the XPC lifecycle queue and the main
+    /// thread all wait on the playlist queue, so the playlist must never wait on this
+    /// queue: it reads this lock-protected copy instead.
+    private struct ClockSnapshot: Sendable {
+        var url: URL
+        var openURLs: [URL]
+        var epoch: Int
+        var ready: Bool
+        var failedURL: URL?
+        var failureSerial: Int
+        var lastEnqueuedEnd: CMTime
+    }
+    private let clockSnapshot: OSAllocatedUnfairLock<ClockSnapshot>
+
+    /// Non-blocking and safe from any thread. The time is read from the timebase (which is
+    /// thread-safe) now, so it is current even though the rest is the last published state.
     func clockSample() -> ClockSample {
-        queue.sync {
-            ClockSample(
-                url: asset.url,
-                seconds: max(0, min(CMTimebaseGetTime(timebase).seconds, lastEnqueuedEnd.seconds)),
-                openURLs: [asset.url] + [currentReader, nextReader].compactMap { ($0?.asset as? AVURLAsset)?.url },
-                epoch: clockEpoch,
-                ready: hasStarted && !flushInFlight && isRunning,
-                failedURL: failedURL,
-                failureSerial: failureSerial,
-            )
-        }
+        let snapshot = clockSnapshot.withLock { $0 }
+        return ClockSample(
+            url: snapshot.url,
+            seconds: max(0, min(CMTimebaseGetTime(timebase).seconds, snapshot.lastEnqueuedEnd.seconds)),
+            openURLs: snapshot.openURLs,
+            epoch: snapshot.epoch,
+            ready: snapshot.ready,
+            failedURL: snapshot.failedURL,
+            failureSerial: snapshot.failureSerial,
+        )
+    }
+    /// Runs on `queue` (or in init) whenever a property in the snapshot changes.
+    private func publishClock() {
+        let snapshot = ClockSnapshot(
+            url: asset.url,
+            openURLs: [asset.url] + [currentReader, nextReader].compactMap { ($0?.asset as? AVURLAsset)?.url },
+            epoch: clockEpoch,
+            ready: hasStarted && !flushInFlight && isRunning,
+            failedURL: failedURL,
+            failureSerial: failureSerial,
+            lastEnqueuedEnd: lastEnqueuedEnd,
+        )
+        clockSnapshot.withLock { $0 = snapshot }
     }
 
     /// The task feeding this renderer its surface's targets (`PlaybackStore.follow`).
     private let followTask = OSAllocatedUnfairLock<Task<Void, Never>?>(initialState: nil)
 
-    private var currentReader: AVAssetReader?
+    private var currentReader: AVAssetReader? {
+        didSet { publishClock() }
+    }
     private var currentOutput: AVAssetReaderTrackOutput?
-    private var nextReader: AVAssetReader?
+    private var nextReader: AVAssetReader? {
+        didSet { publishClock() }
+    }
     private var nextOutput: AVAssetReaderTrackOutput?
 
     /// A renderer `flush` (decoder reset) is the one async hop in the pipeline, and
@@ -86,7 +136,9 @@ final class VideoRenderer: @unchecked Sendable {
     /// flags — touched ONLY on `queue` — serialize it: at most one flush is ever in
     /// flight, and a switch arriving during a flush is coalesced, so when the flush
     /// completes we restart once to whatever the latest selected asset is.
-    private var flushInFlight = false
+    private var flushInFlight = false {
+        didSet { publishClock() }
+    }
     private var restartPending = false
 
     /// Diagnostic: number of remaining feed-loop ticks to log after a restart.
@@ -96,7 +148,10 @@ final class VideoRenderer: @unchecked Sendable {
     // ptsOffset accumulates across loops so both DTS and PTS are monotonically increasing.
     // lastEnqueuedEnd tracks the highest sample end time (max, not last — handles B-frames).
     private var ptsOffset: CMTime = .zero
-    private var lastEnqueuedEnd: CMTime = .zero
+    private var lastEnqueuedEnd: CMTime = .zero {
+        // Per enqueued frame: update just this field.
+        didSet { clockSnapshot.withLock { $0.lastEnqueuedEnd = lastEnqueuedEnd } }
+    }
 
     @MainActor
     static func create(
@@ -157,6 +212,9 @@ final class VideoRenderer: @unchecked Sendable {
         self.renderer = displayLayer.sampleBufferRenderer
         self.asset = asset
         self.videoTrack = videoTrack
+        self.clockSnapshot = OSAllocatedUnfairLock(initialState: ClockSnapshot(
+            url: asset.url, openURLs: [asset.url], epoch: 0, ready: false, failedURL: nil, failureSerial: 0, lastEnqueuedEnd: .zero,
+        ))
 
         var tb: CMTimebase?
         CMTimebaseCreateWithSourceClock(
@@ -302,18 +360,52 @@ final class VideoRenderer: @unchecked Sendable {
 
     /// Switch in place and retain the displayed frame until the new decoder is ready.
     /// force is used only when a different surface takes over this display's session.
+    ///
+    /// The track is loaded asynchronously and applied back on `queue`, so a slow file never
+    /// blocks it. Each request takes a token and only the latest one is applied: rapid
+    /// switches coalesce and a stale load is dropped. A load that has not finished after
+    /// `loadTimeout` counts as a failure of the requested video.
     func play(_ url: URL, at position: Double, force: Bool = false) {
         queue.async { [self] in
-            guard isRunning, force || asset.url != url else { return }
+            guard isRunning else { return }
+            // Already showing or loading it, unless forced.
+            guard force || (pendingURL ?? asset.url) != url else { return }
+            playToken += 1
+            let token = playToken
+            loadTask?.cancel()
+            guard force || asset.url != url else {
+                // Switched back to what is showing: drop the pending load.
+                pendingURL = nil; loadTask = nil
+                return
+            }
+            pendingURL = url
             let newAsset = AVURLAsset(url: url)
-            // Record the requested URL: `asset` is still the old video when this fails.
-            guard let (track, length) = Self.loadVideoTrackBlocking(newAsset) else { recordFailure(url); return }
-            guard length.isFinite, length > 0 else { recordFailure(url); return }
-            failedURL = nil
-            asset = newAsset; videoTrack = track; duration = length
-            startPosition = max(0, position).truncatingRemainder(dividingBy: duration)
-            restartWithCurrentAsset()
+            loadTask = Task.detached { [weak self] in
+                let loaded = await Self.loadVideoTrack(newAsset)
+                self?.queue.async { [weak self] in
+                    self?.finishPlay(token: token, asset: newAsset, loaded: loaded, position: position)
+                }
+            }
+            queue.asyncAfter(deadline: .now() + Self.loadTimeout) { [weak self] in
+                // Still pending: a finished or superseded request has cleared `pendingURL` or moved the token on.
+                guard let self, token == playToken, pendingURL != nil else { return }
+                extensionLog("[Renderer #\(debugID)] Timed out opening \(url.lastPathComponent)")
+                playToken += 1; pendingURL = nil; loadTask?.cancel(); loadTask = nil
+                recordFailure(url)
+            }
         }
+    }
+
+    /// Runs on `queue` when a load finishes. Ignored unless it is still the latest request.
+    private func finishPlay(token: Int, asset newAsset: AVURLAsset, loaded: SendableBox<(AVAssetTrack, Double)>?, position: Double) {
+        guard token == playToken, isRunning else { return }
+        pendingURL = nil; loadTask = nil
+        // Record the requested URL: `asset` is still the old video when this fails.
+        guard let (track, length) = loaded?.value, length.isFinite, length > 0 else { recordFailure(newAsset.url); return }
+        failedURL = nil
+        asset = newAsset; videoTrack = track; duration = length
+        startPosition = max(0, position).truncatingRemainder(dividingBy: duration)
+        restartWithCurrentAsset()
     }
 
     /// Tag a sample buffer so the renderer displays it immediately, replacing all
@@ -333,25 +425,18 @@ final class VideoRenderer: @unchecked Sendable {
         }
     }
 
-    /// Load the first video track synchronously. Call ONLY from the renderer's serial
-    /// `queue` — it blocks that (real, owned) thread on a semaphore while AVFoundation
-    /// loads the track on its own internal queue, so there's no cooperative-executor
-    /// starvation and no out-of-order Task completion. Local files load in a few ms.
-    private static func loadVideoTrackBlocking(_ asset: AVURLAsset) -> (AVAssetTrack, Double)? {
-        let sem = DispatchSemaphore(value: 0)
-        let result = OSAllocatedUnfairLock<SendableBox<(AVAssetTrack, Double)>?>(initialState: nil)
-        Task.detached {
-            defer { sem.signal() }
-            do {
-                if let track = try await asset.loadTracks(withMediaType: .video).first {
-                    let duration = try await track.load(.timeRange).duration.seconds
-                    let loaded = SendableBox(value: (track, duration))
-                    result.withLock { $0 = loaded }
-                }
-            } catch { extensionLog("[Renderer] Cannot open video: \(error)") }
+    private static let loadTimeout: TimeInterval = 10
+
+    /// Load the first video track and its duration. Awaited off `queue` and off the
+    /// caller's thread, so nothing blocks while AVFoundation reads the file.
+    private static func loadVideoTrack(_ asset: AVURLAsset) async -> SendableBox<(AVAssetTrack, Double)>? {
+        do {
+            guard let track = try await asset.loadTracks(withMediaType: .video).first else { return nil }
+            return try await SendableBox(value: (track, track.load(.timeRange).duration.seconds))
+        } catch {
+            extensionLog("[Renderer] Cannot open video: \(error)")
+            return nil
         }
-        sem.wait()
-        return result.withLock { $0 }?.value
     }
 
     /// Stop playback for good. Synchronous with the renderer queue, so no callback is
@@ -361,6 +446,7 @@ final class VideoRenderer: @unchecked Sendable {
         queue.sync {
             extensionLog("  [stop #\(debugID)] stopping renderer for \(asset.url.lastPathComponent)")
             isRunning = false
+            playToken += 1; loadTask?.cancel(); loadTask = nil
             cancelDeepPauseTimer()
             renderer.stopRequestingMediaData()
             currentReader?.cancelReading()
