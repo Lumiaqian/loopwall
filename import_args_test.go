@@ -69,8 +69,8 @@ func TestSecondInstanceImports(t *testing.T) {
 		t.Fatalf("nothing to import: %d %v", n, errs)
 	}
 
-	// Busy: the result says so, instead of dropping the request.
-	a.busy = true
+	// Importing: the result says so, instead of dropping the request.
+	a.importing = true
 	a.secondInstance([]string{"--import", "notes.txt"}, dir)
 	if _, errs := readResult(t, a.root); len(errs) != 1 || !strings.Contains(errs[0], "请稍后") {
 		t.Fatalf("busy: %v", errs)

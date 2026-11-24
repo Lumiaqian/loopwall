@@ -41,12 +41,18 @@ func groupRow(c *ui.Context, title, detail string, control func()) {
 // glassButton is a capsule of interactive glass; prominent tints it with
 // the accent, for the page's main action.
 func glassButton(c *ui.Context, svg *ui.SVG, label string, prominent bool) ui.Element {
+	return glassButtonKey(c, "glass-"+label, svg, label, prominent)
+}
+
+// glassButtonKey is glassButton with a caller-chosen key, so a button whose
+// label changes in place (such as "复制" to "已复制") keeps its identity.
+func glassButtonKey(c *ui.Context, key string, svg *ui.SVG, label string, prominent bool) ui.Element {
 	t := c.Theme()
 	g, fg := glass.Glass{Interactive: true}, t.Text
 	if prominent {
 		g.Tint, fg = t.Accent, t.AccentText
 	}
-	b := current.fillControl(c, ui.ButtonBase(c.Key("glass-"+label)).Padding(8, 16).Gap(6).Radius(999), g).TextColor(fg).Label(label)
+	b := current.fillControl(c, ui.ButtonBase(c.Key(key)).Padding(8, 16).Gap(6).Radius(999), g).TextColor(fg).Label(label)
 	b.Children(func() {
 		if svg != nil {
 			ui.Icon(c, svg)
@@ -84,7 +90,7 @@ func thumbBox(c *ui.Context, bm *ui.Bitmap, w, h, r float32) {
 	})
 }
 
-func emptyState(c *ui.Context, svg *ui.SVG, title, detail string) {
+func emptyState(c *ui.Context, svg *ui.SVG, title, detail string, action ...func()) {
 	t := c.Theme()
 	ui.Column(c).Grow(1).FillWidth().Center().Gap(10).Padding(40).Children(func() {
 		ui.Box(c).Size(64, 64).Radius(18).Center().Background(t.Accent.Alpha(0.12)).TextColor(t.Accent).Children(func() {
@@ -92,5 +98,8 @@ func emptyState(c *ui.Context, svg *ui.SVG, title, detail string) {
 		})
 		ui.Text(c, title).FontSize(16).Bold()
 		ui.Text(c, detail).FontSize(12).TextColor(t.TextMuted)
+		if len(action) > 0 && action[0] != nil {
+			ui.Box(c).Margin(6, 0, 0, 0).Children(action[0])
+		}
 	})
 }

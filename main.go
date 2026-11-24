@@ -26,25 +26,30 @@ import (
 )
 
 type application struct {
-	host          platform.Host
-	root          string
-	config        catalog.Config
-	window        *mygo.Window
-	section       string
-	grid          ui.GridState
-	selected      string
-	rename        string
-	interval      string
-	status        string
-	busy          bool
-	login         bool
-	thumbs        *lru[string, *ui.Bitmap] // decoded library thumbnails, by media ID; see thumb
-	runtime       catalog.Runtime
-	displays      []platform.DisplayInfo
-	preview       *ui.VideoPlayer
-	previewWindow *mygo.Window
-	prefs         prefs
-	share         *sharing // nil when sharing's state could not open
+	host           platform.Host
+	root           string
+	config         catalog.Config
+	window         *mygo.Window
+	section        string
+	grid           ui.GridState
+	selected       string
+	rename         string
+	interval       string
+	status         string
+	choosingImport bool
+	importing      bool
+	importDone     int
+	importTotal    int
+	importCurrent  string
+	deletingMedia  bool
+	login          bool
+	thumbs         *lru[string, *ui.Bitmap] // decoded library thumbnails, by media ID; see thumb
+	runtime        catalog.Runtime
+	displays       []platform.DisplayInfo
+	preview        *ui.VideoPlayer
+	previewWindow  *mygo.Window
+	prefs          prefs
+	share          *sharing // nil when sharing's state could not open
 	// Wallpaper recovery (recovery.go).
 	stuckSignals int64     // the extension's calls for help seen so far
 	stallSince   time.Time // when the displays began waiting, or the extension went silent
@@ -263,16 +268,24 @@ func (a *application) probe(ctx context.Context, path, thumb string) (catalog.Me
 // importFiles imports paths into the library's files, off the main thread:
 // it reads only the host and the root, and returns the entries for
 // addMedia to add.
-func (a *application) importFiles(paths []string) ([]catalog.MediaEntry, []string) {
+func (a *application) importFiles(paths []string, onProgress func(done, total int, name string)) ([]catalog.MediaEntry, []string) {
 	var added []catalog.MediaEntry
 	errs := []string{}
-	for _, path := range paths {
+	total := len(paths)
+	for i, path := range paths {
+		name := filepath.Base(path)
+		if onProgress != nil {
+			onProgress(i, total, name)
+		}
 		m, e := catalog.Import(context.Background(), a.root, path, a.probe)
 		if e != nil {
-			errs = append(errs, filepath.Base(path)+"："+e.Error())
-			continue
+			errs = append(errs, name+"："+e.Error())
+		} else {
+			added = append(added, m)
 		}
-		added = append(added, m)
+		if onProgress != nil {
+			onProgress(i+1, total, name)
+		}
 	}
 	return added, errs
 }
@@ -297,28 +310,39 @@ func (a *application) addImported(entries []catalog.MediaEntry) error {
 	}
 	return err
 }
+
+var openImportDialog = func(parent *mygo.Window) ([]string, error) {
+	return mygo.Dialog.Open(mygo.OpenDialogOptions{
+		Parent:   parent,
+		Title:    "导入视频壁纸",
+		Multiple: true,
+		Filters:  []mygo.FileFilter{{Name: "视频", Extensions: []string{"mp4", "mov", "m4v"}}},
+	})
+}
+
 func (a *application) chooseImport() {
-	if a.busy {
+	if a.choosingImport || a.importing {
 		return
 	}
-	a.busy = true
-	a.status = "请选择视频…"
+	a.choosingImport = true
 	parent := a.window
 	go func() {
-		paths, err := mygo.Dialog.Open(mygo.OpenDialogOptions{Parent: parent, Title: "导入视频壁纸", Multiple: true, Filters: []mygo.FileFilter{{Name: "视频", Extensions: []string{"mp4", "mov", "m4v"}}}})
+		paths, err := openImportDialog(parent)
 		mygo.RunOnMain(func() {
-			a.busy = false
-			switch {
-			case err != nil:
-				a.status = err.Error()
-			case len(paths) == 0:
-				a.status = "已取消导入"
-			default:
-				a.importPaths(paths, nil)
-			}
+			a.finishChooseImport(paths, err)
 			a.invalidate()
 		})
 	}()
+}
+
+func (a *application) finishChooseImport(paths []string, err error) {
+	a.choosingImport = false
+	switch {
+	case err != nil:
+		a.status = err.Error()
+	case len(paths) > 0:
+		a.importPaths(paths, nil)
+	}
 }
 
 // importPaths imports the videos among paths, chosen or dropped, and in
@@ -331,7 +355,7 @@ func (a *application) importPaths(paths []string, done func(imported int, errs [
 			done(imported, errs)
 		}
 	}
-	if a.busy {
+	if a.importing {
 		a.status = "正在处理上一批，请稍后再导入"
 		finish(0, []string{a.status})
 		return
@@ -342,17 +366,32 @@ func (a *application) importPaths(paths []string, done func(imported int, errs [
 		finish(0, []string{a.status})
 		return
 	}
-	a.busy = true
+	a.importing = true
+	a.importDone = 0
+	a.importTotal = len(videos)
+	a.importCurrent = filepath.Base(videos[0])
 	a.section = sectionLibrary
-	a.status = fmt.Sprintf("正在复制并验证 %d 个视频…", len(videos))
 	go func() {
 		// The library changes only on the main thread, by what was added:
 		// what changed it meanwhile, as a download, stays.
-		added, errs := a.importFiles(videos)
+		added, errs := a.importFiles(videos, func(doneCount, total int, name string) {
+			if a.window == nil {
+				return
+			}
+			mygo.RunOnMain(func() {
+				a.importDone = doneCount
+				a.importTotal = total
+				a.importCurrent = name
+				a.invalidate()
+			})
+		})
 		mygo.RunOnMain(func() {
 			err := a.addImported(added)
 			saved := a.finish(err)
-			a.busy = false
+			a.importing = false
+			a.importDone = 0
+			a.importTotal = 0
+			a.importCurrent = ""
 			imported := len(added)
 			switch {
 			case err != nil:
@@ -482,15 +521,15 @@ func (a *application) entry(id string) (catalog.MediaEntry, bool) {
 	return catalog.MediaEntry{}, false
 }
 func (a *application) deleteMedia(m catalog.MediaEntry) {
-	if a.busy {
+	if a.deletingMedia {
 		return
 	}
-	a.busy = true
+	a.deletingMedia = true
 	parent := a.window
 	go func() {
 		r, err := mygo.Dialog.Message(mygo.MessageOptions{Parent: parent, Type: mygo.MessageWarning, Message: "从资料库删除「" + m.Name + "」？", Detail: "原始文件会保留。正在播放的屏幕会切换到下一项。", Buttons: []string{"取消", "删除"}, CancelButton: 0, DefaultButton: 0, DestructiveButtons: []int{1}})
 		mygo.RunOnMain(func() {
-			a.busy = false
+			a.deletingMedia = false
 			if err == nil && r.Button == 1 {
 				saved := a.commit(func(c *catalog.Config) {
 					c.Playlist.VideoIDs = slices.DeleteFunc(c.Playlist.VideoIDs, func(id string) bool { return id == m.ID })

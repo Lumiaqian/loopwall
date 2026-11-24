@@ -43,14 +43,14 @@ func (a *application) settingsView(c *ui.Context) {
 				group(c, func() {
 					groupRow(c, "接电锁屏时保持亮屏", "解锁、拔掉电源或停用本墙纸时自动释放，不改变系统密码要求。", func() {
 						keepAwake := a.config.Playlist.KeepAwakeWhenLockedOnAC
-						if glassSwitch(c, &keepAwake, "接电锁屏保持亮屏", a.busy) {
+						if glassSwitch(c, &keepAwake, "接电锁屏保持亮屏", false) {
 							a.commit(func(cfg *catalog.Config) { cfg.Playlist.KeepAwakeWhenLockedOnAC = keepAwake })
 						}
 					})
 					ui.Divider(c)
 					groupRow(c, "省电模式", "用电池、开启低电量模式或机器过热时暂停壁纸，停在当前画面。", func() {
 						powerSaving := a.config.Playlist.PowerSaving
-						if glassSwitch(c, &powerSaving, "省电模式", a.busy) {
+						if glassSwitch(c, &powerSaving, "省电模式", false) {
 							a.commit(func(cfg *catalog.Config) { cfg.Playlist.PowerSaving = powerSaving })
 						}
 					})
