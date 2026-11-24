@@ -6,7 +6,7 @@
 // bundle it builds, before build-local.sh puts the wallpaper extension in it,
 // so they would update the app without its extension. This package writes
 // them for the final bundle instead, in the format of MyGO v0.9.0
-// (internal/update): a gzip-compressed tar of the bundle, and a manifest
+// and v0.10.0, which did not change it (internal/update): a gzip-compressed tar of the bundle, and a manifest
 // naming it with its size and the signature of its SHA-256 digest.
 package release
 

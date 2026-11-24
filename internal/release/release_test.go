@@ -19,8 +19,9 @@ import (
 )
 
 // extractArchive and verify are MyGO v0.9.0's update.ExtractArchive and
-// update.Verify (internal/update/update.go), copied: what installed apps
-// run on an archive, which this package must write as `mygo build` does.
+// update.Verify (internal/update/update.go, unchanged in v0.10.0), copied:
+// what installed apps run on an archive, which this package must write as
+// `mygo build` does.
 func extractArchive(r io.Reader, dir string) error {
 	gz, err := gzip.NewReader(r)
 	if err != nil {
