@@ -173,7 +173,7 @@ func (a *application) mediaCard(c *ui.Context, m catalog.MediaEntry) {
 	})
 	card.Children(func() {
 		// Thumbnail with playlist order, live playing badge, and duration.
-		thumb := ui.Box(c).Grow(1).MinHeight(0).Radius(10).Clip().Background(t.Surface).Cursor(ui.CursorPointer).
+		thumb := ui.ButtonBase(c.Key("preview-"+m.ID)).Grow(1).MinHeight(0).Radius(10).Clip().Background(t.Surface).Cursor(ui.CursorPointer).
 			Shadow(0, 1, 3, 0, ui.RGBA(0, 0, 0, 0.12)).Label("预览 " + m.Name)
 		if thumb.Clicked() {
 			a.previewMedia(m)

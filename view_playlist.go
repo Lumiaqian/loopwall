@@ -258,12 +258,17 @@ func (a *application) displayCard(c *ui.Context, key, name string, builtIn bool)
 		if s.ok {
 			bm = a.thumb(s.media.ID)
 		}
-		th := thumbBox(c, bm, 128, 72, 7)
 		if s.ok {
-			th.Cursor(ui.CursorPointer).Label("预览 " + s.media.Name).Tooltip("预览 " + s.media.Name)
+			th := ui.ButtonBase(c.Key("disp-preview-"+key)).Size(128, 72).Shrink(0).Radius(7).Clip().
+				Cursor(ui.CursorPointer).Label("预览 " + s.media.Name).Tooltip("预览 " + s.media.Name)
+			th.Children(func() {
+				thumbBox(c, bm, 128, 72, 7)
+			})
 			if th.Clicked() {
 				a.previewMedia(s.media)
 			}
+		} else {
+			thumbBox(c, bm, 128, 72, 7)
 		}
 		ui.Column(c).Gap(5).Grow(1).MinWidth(0).Children(func() {
 			ui.Row(c).Gap(6).AlignItems(ui.Center).Children(func() {
