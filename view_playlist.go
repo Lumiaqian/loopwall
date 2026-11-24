@@ -12,6 +12,16 @@ import (
 	"github.com/egoist/mygo/ui"
 )
 
+var intervalPresets = []struct {
+	label   string
+	seconds int
+}{
+	{"30 秒", 30},
+	{"1 分钟", 60},
+	{"5 分钟", 300},
+	{"15 分钟", 900},
+}
+
 func (a *application) playlistView(c *ui.Context) {
 	t := c.Theme()
 	pageFrame(c, "播放与显示器", "首次均匀错开，之后每块屏独立续播", func() {
@@ -49,7 +59,7 @@ func (a *application) playlistView(c *ui.Context) {
 						if a.config.Playlist.AdvanceMode == "duration" {
 							mode = 1
 						}
-						if glassSegmented(c, &mode, "切换时机", a.busy, "播完一遍", "按时长") {
+						if glassSegmented(c, &mode, "切换时机", false, "播完一遍", "按时长") {
 							a.commit(func(cfg *catalog.Config) { cfg.Playlist.AdvanceMode = []string{"end", "duration"}[mode] })
 						}
 					})
@@ -58,7 +68,32 @@ func (a *application) playlistView(c *ui.Context) {
 						groupRow(c, "每项播放时长", "短于该时长的视频会自动循环", func() {
 							ui.TextInput(c, &a.interval).Width(72).Radius(999).Label("轮播秒数").OnSubmit(a.applyInterval)
 							ui.Text(c, "秒").TextColor(t.TextMuted)
-							glassButton(c, nil, "应用", false).Disabled(a.busy || strings.TrimSpace(a.interval) == strconv.Itoa(a.config.Playlist.IntervalSeconds)).OnClick(a.applyInterval)
+							glassButton(c, nil, "应用", false).Disabled(strings.TrimSpace(a.interval) == strconv.Itoa(a.config.Playlist.IntervalSeconds)).OnClick(a.applyInterval)
+						})
+						ui.Divider(c)
+						groupRow(c, "常用时长", "", func() {
+							for _, preset := range intervalPresets {
+								active := a.config.Playlist.IntervalSeconds == preset.seconds
+								b := ui.ButtonBase(c.Key("preset-"+strconv.Itoa(preset.seconds))).
+									Padding(5, 12).Radius(999).Label(preset.label)
+								switch {
+								case active:
+									b.Background(t.Accent.Alpha(0.16)).TextColor(t.Accent)
+								case b.Pressed():
+									b.Background(t.SurfacePressed).TextColor(t.Text)
+								case b.Hovered():
+									b.Background(t.SurfaceHover).TextColor(t.Text)
+								default:
+									b.Background(t.Surface).TextColor(t.TextMuted)
+								}
+								b.OnClick(func() {
+									a.interval = strconv.Itoa(preset.seconds)
+									a.applyInterval()
+								})
+								b.Children(func() {
+									ui.Text(c, preset.label).FontSize(12).FontWeight(600).SingleLine()
+								})
+							}
 						})
 					}
 				})
@@ -109,20 +144,23 @@ func (a *application) orderRow(c *ui.Context, i, n int, m catalog.MediaEntry) {
 			controls.Opacity(1)
 		}
 		controls.Children(func() {
-			iconButton(c, iconUp, "上移").Disabled(a.busy || i == 0).OnClick(func() {
+			iconButton(c, iconUp, "上移").Disabled(i == 0).OnClick(func() {
 				a.commit(func(c *catalog.Config) { ids := c.Playlist.VideoIDs; ids[i-1], ids[i] = ids[i], ids[i-1] })
 			})
-			iconButton(c, iconDown, "下移").Disabled(a.busy || i == n-1).OnClick(func() {
+			iconButton(c, iconDown, "下移").Disabled(i == n-1).OnClick(func() {
 				a.commit(func(c *catalog.Config) { ids := c.Playlist.VideoIDs; ids[i+1], ids[i] = ids[i], ids[i+1] })
 			})
-			iconButton(c, iconX, "移出轮播").Disabled(a.busy).OnClick(func() { a.togglePlaylist(m.ID) })
+			iconButton(c, iconX, "移出轮播").OnClick(func() { a.togglePlaylist(m.ID) })
 		})
 	})
 }
 
 func (a *application) displayCard(c *ui.Context, key, name string, builtIn bool) {
 	t := c.Theme()
-	s := a.displayState(key)
+	s := a.displayStateAt(key, c.Now())
+	if s.ok && !s.held && !s.waiting && s.media.DurationSeconds > 0 {
+		c.After(time.Second)
+	}
 	current.fillContent(c, ui.Row(c.Key("disp-"+key)).Gap(14).Padding(12).Radius(16).Width(340).Grow(1)).Children(func() {
 		var bm *ui.Bitmap
 		if s.ok {
@@ -164,7 +202,7 @@ func (a *application) pinButton(c *ui.Context, key string) {
 		label = "固定：" + shorten(m.Name, 14)
 	}
 	ui.Row(c).Margin(4, 0, 0, 0).Children(func() {
-		glassButton(c, iconPlaylist, label, false).Disabled(a.busy).Menu(func(menu *ui.Menu) {
+		glassButton(c, iconPlaylist, label, false).Menu(func(menu *ui.Menu) {
 			if menu.Item("轮播播放列表").Radio(pinned == "").Chosen() {
 				a.pinDisplay(key, "")
 			}
@@ -181,7 +219,7 @@ func (a *application) pinButton(c *ui.Context, key string) {
 // pinDisplay makes display key loop video id alone, or play the playlist
 // when id is empty.
 func (a *application) pinDisplay(key, id string) {
-	if a.busy || a.config.Playlist.Pins[key] == id {
+	if a.config.Playlist.Pins[key] == id {
 		return
 	}
 	a.commit(func(c *catalog.Config) {
@@ -198,7 +236,7 @@ func (a *application) pinDisplay(key, id string) {
 
 // pinAll makes every display loop video id alone, saving once.
 func (a *application) pinAll(id string) {
-	if a.busy || len(a.displays) == 0 {
+	if len(a.displays) == 0 {
 		return
 	}
 	a.commit(func(c *catalog.Config) {
