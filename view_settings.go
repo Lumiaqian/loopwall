@@ -86,7 +86,7 @@ func (a *application) settingsView(c *ui.Context) {
 					})
 				})
 			})
-			current.onBackdrop(c, ui.Text(c, strings.TrimSpace("Loopwall "+mygo.App.Version())+" · 基于 Phosphene v1.11.4 · MyGO v0.9.0 · MIT License").FontSize(11), true)
+			current.onBackdrop(c, ui.Text(c, strings.TrimSpace("Loopwall "+mygo.App.Version())+" · 基于 Phosphene v1.11.4 · MyGO v0.10.0 · MIT License").FontSize(11), true)
 		})
 	})
 }
