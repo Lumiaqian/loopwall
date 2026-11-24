@@ -18,22 +18,81 @@ func (a *application) libraryView(c *ui.Context) {
 		}
 	}
 	subtitle := fmt.Sprintf("%d 个视频 · %d 个在轮播中 · 原画质，静音播放", len(a.config.Media), inList)
+	importLabel := "导入视频"
+	if a.importing {
+		importLabel = "导入中…"
+	}
+	importAction := func(c *ui.Context) {
+		glassButton(c, iconImport, importLabel, true).Disabled(a.choosingImport || a.importing).OnClick(a.chooseImport)
+	}
 	pageFrame(c, "资料库", subtitle, func() {
-		label := "导入视频"
-		if a.busy {
-			label = "处理中…"
-		}
-		glassButton(c, iconImport, label, true).Disabled(a.busy).OnClick(a.chooseImport)
-	}, func(top float32) {
 		if len(a.config.Media) == 0 {
-			emptyState(c, iconFilm, "还没有视频", "把视频或文件夹拖到这里，或点右上角「导入视频」。支持 MP4、MOV、M4V，原画质复制，不重新编码。")
 			return
 		}
-		a.grid.Key = func(i int) any { return a.config.Media[i].ID }
-		a.grid.Label = func(i int) string { return a.config.Media[i].Name }
-		overlay(ui.GridView(c, &a.grid, len(a.config.Media), 220, 214, func(i int) {
-			a.mediaCard(c, a.config.Media[i])
-		})).ScrollbarInsets(top, 0, 0, 0).Gap(18).Padding(top+14, 24, 24, 24)
+		importAction(c)
+	}, func(top float32) {
+		showImport := a.importing && a.importTotal > 0
+		showGuide := len(a.config.Media) > 0 && len(a.displays) > 0 && !a.anyDisplayActive()
+		mediaGrid := func() ui.Element {
+			a.grid.Key = func(i int) any { return a.config.Media[i].ID }
+			a.grid.Label = func(i int) string { return a.config.Media[i].Name }
+			return ui.GridView(c, &a.grid, len(a.config.Media), 220, 214, func(i int) {
+				a.mediaCard(c, a.config.Media[i])
+			}).Gap(18)
+		}
+		empty := func() {
+			emptyState(c, iconFilm, "还没有视频", "把视频或文件夹拖到这里，或点下方按钮导入。支持 MP4、MOV、M4V，原画质复制，不重新编码。", func() {
+				importAction(c)
+			})
+		}
+		if showImport || showGuide {
+			ui.Column(c).Fill().Children(func() {
+				ui.Column(c).Padding(top+10, 24, 6, 24).Gap(8).FillWidth().Children(func() {
+					if showImport {
+						a.importProgressBanner(c)
+					}
+					if showGuide {
+						a.wallpaperEnableBanner(c)
+					}
+				})
+				if len(a.config.Media) == 0 {
+					empty()
+					return
+				}
+				mediaGrid().Grow(1).MinHeight(0).FillWidth().Padding(8, 24, 24, 24)
+			})
+			return
+		}
+		if len(a.config.Media) == 0 {
+			empty()
+			return
+		}
+		overlay(mediaGrid()).ScrollbarInsets(top, 0, 0, 0).Padding(top+14, 24, 24, 24)
+	})
+}
+
+func (a *application) wallpaperEnableBanner(c *ui.Context) {
+	t := c.Theme()
+	current.fillContent(c, ui.Row(c).Gap(12).AlignItems(ui.Center).Padding(10, 14).Radius(14).FillWidth()).Children(func() {
+		ui.Icon(c, iconMonitor).FontSize(16).TextColor(t.Accent)
+		ui.Text(c, "尚未在显示器启用「Loopwall 轮播」，前往系统墙纸设置选择即可开始播放").FontSize(12).Grow(1).MinWidth(0)
+		glassButton(c, iconExternal, "系统墙纸设置", false).OnClick(openWallpaperSettings)
+	})
+}
+
+func (a *application) importProgressBanner(c *ui.Context) {
+	t := c.Theme()
+	n := min(a.importDone+1, a.importTotal)
+	frac := float64(a.importDone) / float64(a.importTotal)
+	current.fillContent(c, ui.Column(c).Gap(8).Padding(12, 14).Radius(14).FillWidth()).Children(func() {
+		ui.Row(c).Gap(8).AlignItems(ui.Center).FillWidth().Children(func() {
+			ui.Spinner(c).Label("正在导入")
+			ui.Text(c, fmt.Sprintf("正在导入第 %d / %d 个…", n, a.importTotal)).FontWeight(600)
+			if a.importCurrent != "" {
+				ui.Text(c, a.importCurrent).FontSize(12).TextColor(t.TextMuted).SingleLine().Grow(1).MinWidth(0)
+			}
+		})
+		ui.Progress(c, frac).FillWidth().Label("导入进度")
 	})
 }
 
@@ -69,7 +128,7 @@ func (a *application) mediaCard(c *ui.Context, m catalog.MediaEntry) {
 		ui.Row(c).Gap(6).AlignItems(ui.Center).Children(func() {
 			if a.selected == m.ID {
 				ui.TextInput(c, &a.rename).Grow(1).Radius(999).Label("视频名称").OnSubmit(func() { a.commitRename(m.ID) })
-				iconButton(c, iconCheck, "保存名称").Disabled(a.busy || strings.TrimSpace(a.rename) == "").OnClick(func() { a.commitRename(m.ID) })
+				iconButton(c, iconCheck, "保存名称").Disabled(strings.TrimSpace(a.rename) == "").OnClick(func() { a.commitRename(m.ID) })
 				iconButton(c, iconX, "取消").OnClick(func() { a.selected = "" })
 				return
 			}
@@ -82,11 +141,11 @@ func (a *application) mediaCard(c *ui.Context, m catalog.MediaEntry) {
 				current.onBackdrop(c, ui.Text(c, meta).FontSize(11).SingleLine(), true)
 			})
 			if order >= 0 {
-				iconButton(c, iconCheck, "移出轮播").TextColor(t.Accent).Disabled(a.busy).OnClick(func() { a.togglePlaylist(m.ID) })
+				iconButton(c, iconCheck, "移出轮播").TextColor(t.Accent).OnClick(func() { a.togglePlaylist(m.ID) })
 			} else {
-				iconButton(c, iconPlus, "加入轮播").Disabled(a.busy).OnClick(func() { a.togglePlaylist(m.ID) })
+				iconButton(c, iconPlus, "加入轮播").OnClick(func() { a.togglePlaylist(m.ID) })
 			}
-			iconButton(c, iconMore, "更多").Disabled(a.busy).Menu(func(menu *ui.Menu) {
+			iconButton(c, iconMore, "更多").Menu(func(menu *ui.Menu) {
 				if menu.Item("预览").Chosen() {
 					a.previewMedia(m)
 				}
@@ -120,7 +179,7 @@ func (a *application) mediaCard(c *ui.Context, m catalog.MediaEntry) {
 
 func (a *application) commitRename(id string) {
 	name := strings.TrimSpace(a.rename)
-	if a.busy || name == "" {
+	if name == "" {
 		return
 	}
 	a.selected = ""
