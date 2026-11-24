@@ -90,7 +90,7 @@ func thumbBox(c *ui.Context, bm *ui.Bitmap, w, h, r float32) {
 	})
 }
 
-func emptyState(c *ui.Context, svg *ui.SVG, title, detail string) {
+func emptyState(c *ui.Context, svg *ui.SVG, title, detail string, action ...func()) {
 	t := c.Theme()
 	ui.Column(c).Grow(1).FillWidth().Center().Gap(10).Padding(40).Children(func() {
 		ui.Box(c).Size(64, 64).Radius(18).Center().Background(t.Accent.Alpha(0.12)).TextColor(t.Accent).Children(func() {
@@ -98,5 +98,8 @@ func emptyState(c *ui.Context, svg *ui.SVG, title, detail string) {
 		})
 		ui.Text(c, title).FontSize(16).Bold()
 		ui.Text(c, detail).FontSize(12).TextColor(t.TextMuted)
+		if len(action) > 0 && action[0] != nil {
+			ui.Box(c).Margin(6, 0, 0, 0).Children(action[0])
+		}
 	})
 }

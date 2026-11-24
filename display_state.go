@@ -27,6 +27,18 @@ func (a *application) displayState(key string) displayState {
 	return a.displayStateAt(key, time.Now())
 }
 
+// anyDisplayActive reports whether at least one connected display currently
+// presents or pauses a Loopwall wallpaper.
+func (a *application) anyDisplayActive() bool {
+	now := time.Now()
+	for _, d := range a.displays {
+		if a.displayStateAt(d.Identifier, now).ok {
+			return true
+		}
+	}
+	return false
+}
+
 func (a *application) displayStateAt(key string, now time.Time) displayState {
 	var s displayState
 	if !a.runtime.Fresh(now) {

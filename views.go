@@ -162,11 +162,34 @@ func (a *application) sidebar(c *ui.Context) {
 			ui.Text(c, "未检测到显示器").FontSize(12).TextColor(t.TextMuted)
 		}
 		if a.wallpaperStalled(time.Now()) {
-			glassButton(c, iconAlert, "修复壁纸", true).OnClick(func() { a.repairWallpaper("正在重建墙纸服务…", time.Now()) })
+			repair := ui.ButtonBase(c.Key("side-repair")).FillWidth().Padding(8, 10).Radius(10).Gap(8).AlignItems(ui.Center).
+				TextColor(t.Warning).Label("修复壁纸")
+			switch {
+			case repair.Pressed():
+				repair.Background(t.Warning.Alpha(0.30))
+			case repair.Hovered():
+				repair.Background(t.Warning.Alpha(0.24))
+			default:
+				repair.Background(t.Warning.Alpha(0.16))
+			}
+			repair.OnClick(func() { a.repairWallpaper("正在重建墙纸服务…", time.Now()) })
+			repair.Children(func() {
+				ui.Icon(c, iconAlert).FontSize(15)
+				ui.Text(c, "修复壁纸").FontSize(12).FontWeight(600).SingleLine()
+			})
 		}
 		for _, d := range a.displays {
 			s := a.displayState(d.Identifier)
-			ui.Row(c.Key("side-" + d.Identifier)).Gap(8).AlignItems(ui.Center).Children(func() {
+			row := ui.ButtonBase(c.Key("side-"+d.Identifier)).FillWidth().Padding(6, 8).Radius(10).Gap(8).AlignItems(ui.Center).
+				Label(d.Name + "：" + s.short()).Tooltip("查看播放与显示器")
+			switch {
+			case row.Pressed():
+				row.Background(t.SurfacePressed)
+			case row.Hovered():
+				row.Background(t.SurfaceHover)
+			}
+			row.OnClick(func() { a.section = sectionPlay })
+			row.Children(func() {
 				ui.Box(c).Size(7, 7).Radius(4).Shrink(0).Background(s.color(t))
 				ui.Column(c).Gap(1).MinWidth(0).Grow(1).Children(func() {
 					ui.Text(c, d.Name).FontSize(12).FontWeight(600).SingleLine()

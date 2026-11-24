@@ -31,13 +31,12 @@ func (a *application) nearbyView(c *ui.Context) {
 				emptyState(c, iconNearby, "局域网共享不可用", "无法读取共享设置，请重新打开 App。")
 			case len(s.peers) == 0 && browseProblem(s.status) != "":
 				detail := "查找附近的 Mac 失败：" + browseProblem(s.status) + "。"
+				var action func()
 				if s.status.Denied {
 					detail = "Loopwall 没有本地网络权限，看不到也连不上其他 Mac。\n在「系统设置 → 隐私与安全性 → 本地网络」中打开 Loopwall，然后回到这里。"
+					action = func() { localNetworkButton(c) }
 				}
-				emptyState(c, iconAlert, "无法查找附近的 Mac", detail)
-				if s.status.Denied {
-					localNetworkButton(c)
-				}
+				emptyState(c, iconAlert, "无法查找附近的 Mac", detail, action)
 			case len(s.peers) == 0:
 				detail := "在另一台 Mac 的 Loopwall 中打开「设置 → 局域网共享」，它就会出现在这里。\n第一次查找时 macOS 会询问是否允许访问本地网络，请选择允许。"
 				if a.prefs.Share && s.status.Advertised {
