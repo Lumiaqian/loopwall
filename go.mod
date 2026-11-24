@@ -3,7 +3,7 @@ module github.com/Lumiaqian/loopwall
 go 1.27.4
 
 require (
-	github.com/Lumiaqian/mygo-ui-sdk v0.1.0
+	github.com/Lumiaqian/mygo-ui-sdk v0.1.1
 	github.com/egoist/mygo v0.10.0
 )
 

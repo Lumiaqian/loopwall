@@ -178,27 +178,22 @@ func glassNav(c *ui.Context, selected *string, items []navItem) bool {
 			at = i
 		}
 	}
-	nav := ui.Column(c.Key("nav")).Gap(gap).Padding(0, inset).Label("分区")
-	if !c.FocusTakesText() {
-		switch {
-		case nav.Shortcut(0, ui.KeyDown) && at < len(items)-1:
-			at++
-		case nav.Shortcut(0, ui.KeyUp) && at > 0:
-			at--
-		}
-	}
+	nav := behaviors.NavList(c.Key("nav"), &at, len(items), behaviors.NavListOptions{
+		Label: "分区",
+	})
+	nav.Root.Gap(gap).Padding(0, inset)
 	*selected = items[at].id
 	target := float32(at * (rowH + gap))
-	y := nav.AnimateTo("lens", target, ui.Smooth)
+	y := nav.Root.AnimateTo("lens", target, ui.Smooth)
 	var swell float32
 	if absf(y-target) > 0.5 {
 		swell = 1
 	}
-	l := nav.AnimateTo("swell", swell, ui.Smooth)
+	l := nav.Root.AnimateTo("swell", swell, ui.Smooth)
 	if !current.glass {
 		l = 0
 	}
-	nav.Children(func() {
+	nav.Root.Children(func() {
 		lens := ui.Box(c).Absolute().Top(y - l*3).Left(inset - l*4).Right(inset - l*4).Height(rowH + l*6).Radius(12).PassThrough().ZIndex(0)
 		g := glass.Glass{Tint: t.Accent.Alpha(0.24 * (1 - l))}
 		if l > 0.3 {
@@ -207,13 +202,10 @@ func glassNav(c *ui.Context, selected *string, items []navItem) bool {
 		current.fillControl(c, lens, g).InsetShadow(0, 0, 0, 1, lensRim(l))
 		for i, it := range items {
 			on := i == at
-			b := ui.ButtonBase(c.Key("nav-"+it.id)).Height(rowH).Padding(0, 10).Gap(10).Radius(12).AlignItems(ui.Center).
-				Label(it.label).AccessSelected(on).ZIndex(1) // over the lens, which is placed Absolute
+			b := nav.Item(c.Key("nav-"+it.id), i, it.label).Height(rowH).Padding(0, 10).Gap(10).Radius(12).AlignItems(ui.Center).
+				ZIndex(1) // over the lens, which is placed Absolute
 			if b.Hovered() && !on {
 				b.Background(t.SurfaceHover)
-			}
-			if b.Clicked() {
-				*selected = it.id
 			}
 			b.Children(func() {
 				ui.Icon(c, it.icon).FontSize(16).TextColor(t.Accent)
@@ -234,5 +226,6 @@ func glassNav(c *ui.Context, selected *string, items []navItem) bool {
 			})
 		}
 	})
+	*selected = items[at].id
 	return *selected != from
 }
