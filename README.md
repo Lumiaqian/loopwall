@@ -126,7 +126,7 @@ open "$HOME/Applications/Loopwall.app"
 ```
 
 ### GitHub Actions 流水线（`.github/workflows/build.yml`）
-- **持续集成与打包**：每次推送 `main`、发起 PR、推动 `v*` 标签或手动触发时，在 `xcode-27` 运行器执行桥接校验、`scripts/test.sh`、`gofmt` / `swiftformat` / `swiftlint` 检查、调用 `scripts/build-local.sh` 并校验 `mygo.json` 与 `LoopwallExtension` 版本号一致性，最终打包上传 `Loopwall-<version>-arm64.zip` 与 `.sha256` 产物。
+- **持续集成与打包**：每次推送 `main`、发起 PR、推动 `v*` 标签或手动触发时，在 `xcode-27` 运行器执行桥接校验、`scripts/test.sh`、`gofmt` / `swiftformat` / `swiftlint` 检查、调用 `scripts/build-local.sh` 并校验 `mygo.json` 与 `LoopwallExtension` 版本号一致性，最终打包上传 `Loopwall-<version>-arm64.zip` 与 `.sha256` 产物。当仓库配置了 `MACOS_CERTIFICATE`、`MACOS_CERTIFICATE_PASSWORD`、`MACOS_SIGNING_IDENTITY` 机密时，会同时以固定证书签名主应用与 `LoopwallExtension.appex` 并校验 designated requirement 不退回 `cdhash`；未配置时自动退回 ad-hoc 签名。本地构建亦可通过传入 `MACOS_SIGNING_IDENTITY="..." scripts/build-local.sh` 使用固定证书。
 - **标签签名与自动发版**：推送 `v*` 标签时额外使用仓库机密 `MYGO_UPDATER_PRIVATE_KEY` 运行 `cmd/updatepack` 为含扩展的完整包体签名（生成 `loopwall-*.tar.gz` 与 `update-darwin-arm64.json`），从 `CHANGELOG.md` 提取对应版本更新日志并发布 GitHub Release。
 
 ### 来源与许可
