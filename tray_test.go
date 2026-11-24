@@ -2,7 +2,10 @@ package main
 
 import (
 	"bytes"
+	"encoding/json"
 	"image/png"
+	"os"
+	"slices"
 	"testing"
 	"time"
 
@@ -93,5 +96,38 @@ func TestBuildTrayMenuDisplayStatesAndPowerSaving(t *testing.T) {
 		if it.Label == "省电模式" && it.Checked {
 			t.Fatal("power saving item remained checked after setPowerSaving(false)")
 		}
+	}
+}
+
+func TestAppMenuAndBundleLocaleUseSimplifiedChinese(t *testing.T) {
+	configureAppLocale()
+
+	if langs := mygo.App.Languages(); !slices.Equal(langs, []string{"zh-Hans"}) {
+		t.Fatalf("App.Languages() = %v, want [zh-Hans]", langs)
+	}
+
+	menu := buildAppMenu()
+	top := menu.Items()
+	if len(top) != 3 || top[0].Role != mygo.RoleAppMenu || top[1].Role != mygo.RoleEditMenu || top[2].Role != mygo.RoleWindowMenu {
+		t.Fatalf("top menu roles = %+v, want [appMenu editMenu windowMenu]", top)
+	}
+
+	raw, err := os.ReadFile("mygo.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var cfg struct {
+		MacOS struct {
+			InfoPlist struct {
+				Region        string   `json:"CFBundleDevelopmentRegion"`
+				Localizations []string `json:"CFBundleLocalizations"`
+			} `json:"infoPlist"`
+		} `json:"macos"`
+	}
+	if err := json.Unmarshal(raw, &cfg); err != nil {
+		t.Fatal(err)
+	}
+	if cfg.MacOS.InfoPlist.Region != "zh-Hans" || !slices.Contains(cfg.MacOS.InfoPlist.Localizations, "zh-Hans") {
+		t.Fatalf("mygo.json macos.infoPlist localization = (%q, %v), want zh-Hans", cfg.MacOS.InfoPlist.Region, cfg.MacOS.InfoPlist.Localizations)
 	}
 }

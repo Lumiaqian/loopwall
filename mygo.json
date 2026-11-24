@@ -8,7 +8,13 @@
   "macos": {
     "minimumSystemVersion": "26.0",
     "signingIdentity": "-",
-    "icon": "resources/Loopwall.icon"
+    "icon": "resources/Loopwall.icon",
+    "infoPlist": {
+      "CFBundleDevelopmentRegion": "zh-Hans",
+      "CFBundleLocalizations": [
+        "zh-Hans"
+      ]
+    }
   },
   "urlSchemes": [
     "loopwall"
