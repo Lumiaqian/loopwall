@@ -25,6 +25,14 @@ import (
 	"github.com/egoist/mygo/ui"
 )
 
+type focusTarget uint8
+
+const (
+	focusNone focusTarget = iota
+	focusRename
+	focusSearch
+)
+
 type application struct {
 	host           platform.Host
 	root           string
@@ -34,6 +42,10 @@ type application struct {
 	grid           ui.GridState
 	selected       string
 	rename         string
+	renameHandle   ui.Handle
+	focus          focusTarget
+	libraryQuery   string
+	libraryFilter  int
 	interval       string
 	status         string
 	choosingImport bool
@@ -44,6 +56,7 @@ type application struct {
 	deletingMedia  bool
 	login          bool
 	thumbs         *lru[string, *ui.Bitmap] // decoded library thumbnails, by media ID; see thumb
+	fileSizes      map[string]int64         // cached byte sizes of local videos, by media ID
 	runtime        catalog.Runtime
 	displays       []platform.DisplayInfo
 	preview        *ui.VideoPlayer
@@ -270,6 +283,26 @@ func (a *application) thumb(id string) *ui.Bitmap {
 	}
 	a.thumbs.Put(id, bm)
 	return bm
+}
+
+// mediaSize returns m's on-disk byte size via os.Stat and caches it so
+// library cards show file sizes without changing catalog.json.
+func (a *application) mediaSize(m catalog.MediaEntry) int64 {
+	if a.fileSizes != nil {
+		if sz, ok := a.fileSizes[m.ID]; ok {
+			return sz
+		}
+	}
+	info, err := os.Stat(catalog.VideoPath(a.root, m))
+	if err != nil {
+		return 0
+	}
+	if a.fileSizes == nil {
+		a.fileSizes = map[string]int64{}
+	}
+	sz := info.Size()
+	a.fileSizes[m.ID] = sz
+	return sz
 }
 
 // probe reads a video's size, rate and length and writes its thumbnail,
@@ -551,8 +584,16 @@ func (a *application) deleteMedia(m catalog.MediaEntry) {
 					c.Media = slices.DeleteFunc(c.Media, func(e catalog.MediaEntry) bool { return e.ID == m.ID })
 					c.RemovedMediaIDs = append(c.RemovedMediaIDs, m.ID)
 				})
-				if _, ok := a.entry(m.ID); !ok && a.thumbs != nil {
-					a.thumbs.Remove(m.ID)
+				if _, ok := a.entry(m.ID); !ok {
+					if a.thumbs != nil {
+						a.thumbs.Remove(m.ID)
+					}
+					if a.fileSizes != nil {
+						delete(a.fileSizes, m.ID)
+					}
+					if a.selected == m.ID {
+						a.cancelRename()
+					}
 				}
 				if a.previewWindow != nil {
 					a.previewWindow.Close()
