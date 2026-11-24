@@ -104,7 +104,7 @@ func (a *application) playlistView(c *ui.Context) {
 				ui.Row(c).Gap(8).AlignItems(ui.Center).FillWidth().Children(func() {
 					sectionTitle(c, iconList, fmt.Sprintf("播放顺序 · %d", len(a.config.Playlist.VideoIDs)))
 					ui.Box(c).Grow(1)
-					if hasMissing {
+					if len(a.config.Playlist.VideoIDs) > 0 && hasMissing {
 						glassButton(c, iconPlus, "全部加入轮播", false).OnClick(a.addAllToPlaylist)
 					}
 					if len(a.config.Playlist.VideoIDs) > 0 {
