@@ -3,6 +3,7 @@ package main
 import (
 	"time"
 
+	"github.com/Lumiaqian/mygo-ui-sdk/behaviors"
 	"github.com/egoist/mygo/plugins/glass"
 	"github.com/egoist/mygo/ui"
 )
@@ -18,16 +19,6 @@ const dragThreshold = 3
 // that ends a drag is no click and asks for none, so without it the knob
 // or lens would wait, half way, for whatever draws the window next.
 const dragFrame = 16 * time.Millisecond
-
-// knobDrag is what a glassSwitch or glassSegmented keeps while its knob or
-// lens is dragged.
-type knobDrag struct {
-	active bool
-	pos    float32 // the knob's or lens's left edge, following the pointer
-	moved  float32 // how far the pointer moved since the press
-	start  bool    // the switch's value when the press began
-	origin float32 // where the pointer pressed, from the first segment
-}
 
 // lensGlass is the glass of a knob or lens swollen by l, from 0 at rest,
 // tinted white by rest, to 1, clear.
@@ -59,49 +50,28 @@ func glassSegmented(c *ui.Context, selected *int, label string, disabled bool, l
 	t := c.Theme()
 	const w, h, pad = 96, 30, 3
 	n := len(labels)
-	hi := float32((n - 1) * w)
 	tint := float32(0.35)
 	if t.Dark {
 		tint = 0.14
 	}
-	track := ui.ButtonBase(c.Key("seg-" + label)).Padding(pad).Radius(999).Background(t.Text.Alpha(0.06)).
-		Label(label + "：" + labels[*selected]).Disabled(disabled)
-	d := ui.Local(track, "drag", func() knobDrag { return knobDrag{} })
-	px, _, _ := track.PointerPosition()
-	from := *selected
-	if dx, _, pressed := track.Dragged(); pressed && !disabled {
-		if !d.active {
-			*d = knobDrag{active: true, pos: float32(*selected * w), origin: px - pad}
-		}
-		d.pos = min(hi, max(0, d.pos+dx))
-		d.moved += absf(dx)
-	} else if d.active {
-		// Let go: a drag settles on the segment under the lens, a click
-		// chooses the one it pressed.
-		if d.moved > dragThreshold {
-			*selected = lensIndex(d, *selected, w)
-		} else {
-			*selected = min(n-1, max(0, int(d.origin/w)))
-		}
-		d.active = false
-	} else if track.Clicked() {
-		*selected = (*selected + 1) % n // Enter or Space
-	} else if track.Shortcut(0, ui.KeyLeft) && *selected > 0 {
-		*selected--
-	} else if track.Shortcut(0, ui.KeyRight) && *selected < n-1 {
-		*selected++
-	}
-	target := float32(*selected * w)
-	if d.active {
-		target = d.pos
-		c.After(dragFrame)
-	}
+	res := behaviors.SegmentedTrack(c.Key("seg-"+label), selected, behaviors.SegmentedTrackOptions{
+		Label:         label,
+		Labels:        labels,
+		SegmentWidth:  w,
+		Padding:       pad,
+		Disabled:      disabled,
+		DragThreshold: dragThreshold,
+		FrameInterval: dragFrame,
+	})
+	track := res.Track.Padding(pad).Radius(999).Background(t.Text.Alpha(0.06)).
+		Label(label + "：" + labels[*selected])
+	target := res.Target
 	x := track.AnimateTo("lens", target, ui.Smooth)
-	if d.active {
-		x = d.pos // under the pointer, without lag
+	if res.Dragging {
+		x = target // under the pointer, without lag
 	}
 	var swell float32
-	if d.active || absf(x-target) > 0.5 {
+	if res.Dragging || absf(x-target) > 0.5 {
 		swell = 1
 	}
 	l := track.AnimateTo("swell", swell, ui.Smooth)
@@ -136,15 +106,7 @@ func glassSegmented(c *ui.Context, selected *int, label string, disabled bool, l
 			}
 		})
 	})
-	return *selected != from
-}
-
-// lensIndex is the segment a segmented control's lens is over.
-func lensIndex(d *knobDrag, selected, w int) int {
-	if !d.active {
-		return selected
-	}
-	return int(d.pos/float32(w) + 0.5)
+	return res.Changed
 }
 
 // glassSwitch is a switch in the Liquid Glass style: a capsule, the accent
@@ -156,42 +118,24 @@ func glassSwitch(c *ui.Context, on *bool, label string, disabled bool) bool {
 	t := c.Theme()
 	const w, h, knobW, knobH, lensW, lensH, pad = 50, 28, 30, 22, 42, 34, 3
 	const lo, hi = float32(pad), float32(w - knobW - pad)
-	side := func(on bool) float32 {
-		if on {
-			return hi
-		}
-		return lo
-	}
-	sw := ui.SwitchBase(c, on).Size(w, h).Radius(999).Label(label).Disabled(disabled)
-	changed := sw.Changed()
-	d := ui.Local(sw, "drag", func() knobDrag { return knobDrag{} })
-	target := side(*on)
-	if dx, _, pressed := sw.Dragged(); pressed && !disabled {
-		if !d.active {
-			*d = knobDrag{active: true, pos: target, start: *on}
-		}
-		d.pos = min(hi, max(lo, d.pos+dx))
-		d.moved += absf(dx)
-		target = d.pos
-	} else if d.active {
-		// Let go: a drag decides by where the knob is, overriding the toggle
-		// the release also makes; a tap has toggled.
-		d.active = false
-		if d.moved > dragThreshold {
-			*on = d.pos > (lo+hi)/2
-			changed = *on != d.start
-			target = side(*on)
-		}
-	}
+	res := behaviors.SwitchTrack(c, on, behaviors.SwitchTrackOptions{
+		Label:         label,
+		Min:           lo,
+		Max:           hi,
+		Disabled:      disabled,
+		DragThreshold: dragThreshold,
+		FrameInterval: dragFrame,
+	})
+	sw := res.Switch.Size(w, h).Radius(999)
+	target := res.Target
 	x := sw.AnimateTo("knob", target, ui.Smooth)
-	if d.active {
-		x = d.pos // under the pointer, without lag
-		c.After(dragFrame)
+	if res.Active {
+		x = target // under the pointer, without lag
 	}
 	// The track's color follows the knob, so the lens has it to bend.
-	sw.Background(t.Text.Alpha(0.12).MixOklab(t.Accent, sw.AnimateTo("on", (target-lo)/(hi-lo), ui.Smooth)))
+	sw.Background(t.Text.Alpha(0.12).MixOklab(t.Accent, sw.AnimateTo("on", res.Progress, ui.Smooth)))
 	var swell float32
-	if d.active || sw.Pressed() || absf(x-target) > 0.5 {
+	if res.Active || sw.Pressed() || absf(x-target) > 0.5 {
 		swell = 1
 	}
 	l := sw.AnimateTo("lens", swell, ui.Smooth)
@@ -208,7 +152,7 @@ func glassSwitch(c *ui.Context, on *bool, label string, disabled bool) bool {
 		}
 		knob.Shadow(0, 1, 3, 0, ui.RGBA(0, 0, 0, 0.18*(1-l)))
 	})
-	return changed
+	return res.Changed
 }
 
 // navItem is a page of the sidebar's navigation.
