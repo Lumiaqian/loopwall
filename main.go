@@ -19,6 +19,7 @@ import (
 	"github.com/Lumiaqian/loopwall/internal/catalog"
 	"github.com/Lumiaqian/loopwall/internal/platform"
 	"github.com/egoist/mygo"
+	_ "github.com/egoist/mygo/locales/zh-Hans"
 	"github.com/egoist/mygo/plugins/updater"
 	updatenative "github.com/egoist/mygo/plugins/updater/native"
 	"github.com/egoist/mygo/ui"
@@ -70,8 +71,21 @@ type application struct {
 	repairedAt   time.Time // when the app last restarted WallpaperAgent
 }
 
-func main() {
+func configureAppLocale() {
 	mygo.App.SetName("Loopwall")
+	mygo.App.SetLanguages("zh-Hans")
+}
+
+func buildAppMenu() *mygo.Menu {
+	return mygo.NewMenu([]*mygo.MenuItem{
+		{Role: mygo.RoleAppMenu},
+		{Role: mygo.RoleEditMenu},
+		{Role: mygo.RoleWindowMenu},
+	})
+}
+
+func main() {
+	configureAppLocale()
 	// Updates, asked before they install (update.go).
 	mygo.Use(updatenative.Plugin)
 	updatesUsed = true
@@ -87,8 +101,10 @@ func main() {
 	})
 	mygo.App.OnSecondInstance(app.secondInstance)
 	mygo.App.OnOpenURL(func(_ string) { app.open() })
-	mygo.App.SetMenu(mygo.NewMenu([]*mygo.MenuItem{{Role: mygo.RoleAppMenu}, {Role: mygo.RoleEditMenu}, {Role: mygo.RoleWindowMenu}}))
 	mygo.App.WhenReady(func() {
+		// Install after startLocale so MyGo role menus (including the Edit -> Speech submenu)
+		// pick up zh-Hans instead of falling back to English.
+		mygo.App.SetMenu(buildAppMenu())
 		var err error
 		app.host, err = platform.NewHost()
 		if err != nil {
