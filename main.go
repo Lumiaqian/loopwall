@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"fmt"
-	"image"
 	"image/color"
 	"image/png"
 	"io/fs"
@@ -57,6 +56,8 @@ type application struct {
 	login          bool
 	thumbs         *lru[string, *ui.Bitmap] // decoded library thumbnails, by media ID; see thumb
 	fileSizes      map[string]int64         // cached byte sizes of local videos, by media ID
+	tray           *mygo.Tray
+	traySig        string
 	runtime        catalog.Runtime
 	displays       []platform.DisplayInfo
 	preview        *ui.VideoPlayer
@@ -136,17 +137,14 @@ func main() {
 		version := mygo.App.Version()
 		app.checkExtension(app.launchedVersion(version), version)
 		updater.OnInstalled(guardRelaunch)
-		tray, err := mygo.NewTray(mygo.TrayOptions{Icon: trayIcon(), IconIsTemplate: true, ToolTip: "Loopwall", Menu: mygo.NewMenu([]*mygo.MenuItem{
-			{Label: "打开资料库", Click: func(*mygo.MenuItem, *mygo.Window) { app.open() }},
-			{Label: "系统墙纸设置", Click: func(*mygo.MenuItem, *mygo.Window) { openWallpaperSettings() }},
-			updater.MenuItem(),
-			{Label: "修复壁纸（重建墙纸服务）", Click: func(*mygo.MenuItem, *mygo.Window) { app.repairWallpaper("正在重建墙纸服务…", time.Now()) }},
-			mygo.Separator(), {Label: "退出管理端（壁纸继续播放）", Click: func(*mygo.MenuItem, *mygo.Window) { mygo.App.Quit() }},
-		})})
+		menu, sig := app.buildTrayMenu()
+		tray, err := mygo.NewTray(mygo.TrayOptions{Icon: trayIcon(), IconIsTemplate: true, ToolTip: "Loopwall", Menu: menu})
 		if err != nil {
 			log.Println(err)
+		} else {
+			app.tray = tray
+			app.traySig = sig
 		}
-		_ = tray
 		if !mygo.App.WasOpenedAtLogin() {
 			app.open()
 		}
@@ -172,6 +170,7 @@ func main() {
 						app.displays = displays
 					}
 					app.observeWallpaper(r, stuck, time.Now())
+					app.syncTrayMenu()
 					if app.window != nil {
 						app.window.Invalidate()
 					}
@@ -244,6 +243,7 @@ func (a *application) commitQuiet(edit func(*catalog.Config)) bool {
 		a.status = "已保存，通知扩展失败：" + err.Error()
 		return false
 	}
+	a.syncTrayMenu()
 	return true
 }
 
@@ -259,6 +259,7 @@ func (a *application) finish(err error) bool {
 		return false
 	}
 	a.status = "已保存，壁纸会自动更新"
+	a.syncTrayMenu()
 	return true
 }
 
@@ -617,22 +618,96 @@ func (a *application) reapLater() {
 		}
 	}()
 }
+
+var trayIconSVG = icon(`<path d="M7 14H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2v3"/><rect x="8" y="9" width="14" height="12" rx="2"/><path d="M13.2 12.2v5.6l4.6-2.8z"/>`)
+
 func trayIcon() []byte {
-	img := image.NewRGBA(image.Rect(0, 0, 36, 36))
-	ink := color.RGBA{0, 0, 0, 255}
-	for y := 6; y < 29; y++ {
-		for x := 3; x < 33; x++ {
-			if x < 6 || x > 29 || y < 9 || y > 25 {
-				img.Set(x, y, ink)
-			}
-		}
-	}
-	for y := 12; y < 23; y++ {
-		for x := 14; x < 14+(y-12)/2+1 && x < 22; x++ {
-			img.Set(x, y, ink)
-		}
-	}
+	img := trayIconSVG.Image(36, 36, color.Black)
 	var b bytes.Buffer
 	_ = png.Encode(&b, img)
 	return b.Bytes()
+}
+
+func (a *application) setPowerSaving(on bool) {
+	if a.config.Playlist.PowerSaving == on {
+		return
+	}
+	a.commit(func(c *catalog.Config) { c.Playlist.PowerSaving = on })
+	a.invalidate()
+}
+
+func (a *application) buildTrayMenu() (*mygo.Menu, string) {
+	var items []*mygo.MenuItem
+	var sig strings.Builder
+	sig.WriteString(strconv.FormatBool(a.config.Playlist.PowerSaving))
+	sig.WriteByte('|')
+	sig.WriteString(strconv.FormatBool(updatesUsed))
+	if len(a.displays) == 0 {
+		items = append(items, &mygo.MenuItem{Label: "未检测到显示器", Disabled: true})
+		sig.WriteString("|none")
+	} else {
+		for _, d := range a.displays {
+			sub, badge := a.displayState(d.Identifier).trayStatus()
+			sig.WriteByte('|')
+			sig.WriteString(d.Identifier)
+			sig.WriteByte('=')
+			sig.WriteString(d.Name)
+			sig.WriteByte(':')
+			sig.WriteString(sub)
+			sig.WriteByte(':')
+			sig.WriteString(badge)
+			items = append(items, &mygo.MenuItem{
+				Label:    d.Name,
+				Subtitle: sub,
+				Badge:    badge,
+				Click: func(*mygo.MenuItem, *mygo.Window) {
+					a.section = sectionPlay
+					a.open()
+				},
+			})
+		}
+	}
+	items = append(items,
+		mygo.Separator(),
+		&mygo.MenuItem{Label: "打开资料库", Click: func(*mygo.MenuItem, *mygo.Window) {
+			a.section = sectionLibrary
+			a.open()
+		}},
+		&mygo.MenuItem{Label: "导入视频…", Click: func(*mygo.MenuItem, *mygo.Window) {
+			a.open()
+			a.chooseImport()
+		}},
+		&mygo.MenuItem{
+			Label:    "省电模式",
+			Type:     mygo.MenuItemCheckbox,
+			Checked:  a.config.Playlist.PowerSaving,
+			KeepOpen: true,
+			Click: func(it *mygo.MenuItem, _ *mygo.Window) {
+				a.setPowerSaving(it.IsChecked())
+			},
+		},
+		&mygo.MenuItem{Label: "系统墙纸设置", Click: func(*mygo.MenuItem, *mygo.Window) { openWallpaperSettings() }},
+		mygo.Separator(),
+	)
+	if updatesUsed {
+		items = append(items, updater.MenuItem())
+	}
+	items = append(items,
+		&mygo.MenuItem{Label: "修复壁纸（重建墙纸服务）", Click: func(*mygo.MenuItem, *mygo.Window) { a.repairWallpaper("正在重建墙纸服务…", time.Now()) }},
+		mygo.Separator(),
+		&mygo.MenuItem{Label: "退出管理端（壁纸继续播放）", Click: func(*mygo.MenuItem, *mygo.Window) { mygo.App.Quit() }},
+	)
+	return mygo.NewMenu(items), sig.String()
+}
+
+func (a *application) syncTrayMenu() {
+	if a.tray == nil {
+		return
+	}
+	menu, sig := a.buildTrayMenu()
+	if sig == a.traySig {
+		return
+	}
+	a.traySig = sig
+	a.tray.SetMenu(menu)
 }

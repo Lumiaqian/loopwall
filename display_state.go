@@ -127,3 +127,15 @@ func (s displayState) detail() string {
 	}
 	return "在系统墙纸设置中选择「Loopwall 轮播」"
 }
+
+func (s displayState) trayStatus() (subtitle, badge string) {
+	switch {
+	case s.ok && s.held:
+		return s.media.Name, "已暂停"
+	case s.ok && s.waiting:
+		return s.media.Name, "等待恢复"
+	case s.ok:
+		return s.media.Name, "播放中"
+	}
+	return "", "未启用"
+}
