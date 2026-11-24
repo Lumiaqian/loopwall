@@ -153,9 +153,15 @@ func (s *previewSession) close() {
 	}
 }
 
+var previewStarter = (*application).startPreview
+
 // previewMedia opens a window playing m, looped and muted. It shows the
 // thumbnail at once, and the video from its first picture on.
 func (a *application) previewMedia(m catalog.MediaEntry) {
+	previewStarter(a, m)
+}
+
+func (a *application) startPreview(m catalog.MediaEntry) {
 	if a.previewWindow != nil {
 		a.previewWindow.Close()
 	}

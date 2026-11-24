@@ -86,6 +86,10 @@ func glassSegmented(c *ui.Context, selected *int, label string, disabled bool, l
 		d.active = false
 	} else if track.Clicked() {
 		*selected = (*selected + 1) % n // Enter or Space
+	} else if track.Shortcut(0, ui.KeyLeft) && *selected > 0 {
+		*selected--
+	} else if track.Shortcut(0, ui.KeyRight) && *selected < n-1 {
+		*selected++
 	}
 	target := float32(*selected * w)
 	if d.active {
@@ -209,10 +213,11 @@ func glassSwitch(c *ui.Context, on *bool, label string, disabled bool) bool {
 
 // navItem is a page of the sidebar's navigation.
 type navItem struct {
-	id    string
-	icon  *ui.SVG
-	label string
-	badge string // a count after the label, if any
+	id          string
+	icon        *ui.SVG
+	label       string
+	badge       string // a count or update tag after the label, if any
+	accentBadge bool
 }
 
 // glassNav is the sidebar's navigation in the Liquid Glass style: a lens
@@ -230,11 +235,13 @@ func glassNav(c *ui.Context, selected *string, items []navItem) bool {
 		}
 	}
 	nav := ui.Column(c.Key("nav")).Gap(gap).Padding(0, inset).Label("分区")
-	switch {
-	case nav.Shortcut(0, ui.KeyDown) && at < len(items)-1:
-		at++
-	case nav.Shortcut(0, ui.KeyUp) && at > 0:
-		at--
+	if !c.FocusTakesText() {
+		switch {
+		case nav.Shortcut(0, ui.KeyDown) && at < len(items)-1:
+			at++
+		case nav.Shortcut(0, ui.KeyUp) && at > 0:
+			at--
+		}
 	}
 	*selected = items[at].id
 	target := float32(at * (rowH + gap))
@@ -271,7 +278,14 @@ func glassNav(c *ui.Context, selected *string, items []navItem) bool {
 					name.FontWeight(600)
 				}
 				if it.badge != "" {
-					ui.Text(c, it.badge).FontSize(11).FontWeight(600).TextColor(t.TextMuted)
+					if it.accentBadge {
+						ui.Row(c).Gap(4).AlignItems(ui.Center).Children(func() {
+							ui.Box(c).Size(6, 6).Radius(3).Background(t.Accent)
+							ui.Text(c, it.badge).FontSize(11).FontWeight(600).TextColor(t.Accent)
+						})
+					} else {
+						ui.Text(c, it.badge).FontSize(11).FontWeight(600).TextColor(t.TextMuted)
+					}
 				}
 			})
 		}

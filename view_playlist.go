@@ -253,12 +253,18 @@ func (a *application) displayCard(c *ui.Context, key, name string, builtIn bool)
 	if s.ok && !s.held && !s.waiting && s.media.DurationSeconds > 0 {
 		c.After(time.Second)
 	}
-	current.fillContent(c, ui.Row(c.Key("disp-"+key)).Gap(14).Padding(12).Radius(16).Width(340).Grow(1)).Children(func() {
+	current.fillContent(c, ui.Row(c.Key("disp-"+key)).Gap(14).Padding(12).Radius(16).Width(340).MaxWidth(480).Grow(1)).Children(func() {
 		var bm *ui.Bitmap
 		if s.ok {
 			bm = a.thumb(s.media.ID)
 		}
-		thumbBox(c, bm, 128, 72, 7)
+		th := thumbBox(c, bm, 128, 72, 7)
+		if s.ok {
+			th.Cursor(ui.CursorPointer).Label("预览 " + s.media.Name).Tooltip("预览 " + s.media.Name)
+			if th.Clicked() {
+				a.previewMedia(s.media)
+			}
+		}
 		ui.Column(c).Gap(5).Grow(1).MinWidth(0).Children(func() {
 			ui.Row(c).Gap(6).AlignItems(ui.Center).Children(func() {
 				ui.Icon(c, iconMonitor).TextColor(t.TextMuted)

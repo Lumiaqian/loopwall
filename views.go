@@ -23,6 +23,23 @@ const (
 )
 
 func (a *application) view(c *ui.Context) {
+	switch {
+	case c.Shortcut(ui.Cmd, ui.Key1):
+		a.section = sectionLibrary
+	case c.Shortcut(ui.Cmd, ui.Key2):
+		a.section = sectionPlay
+	case c.Shortcut(ui.Cmd, ui.Key3):
+		a.section = sectionNearby
+	case c.Shortcut(ui.Cmd, ui.Key4), c.Shortcut(ui.Cmd, ui.KeyComma):
+		a.section = sectionSetting
+	case c.Shortcut(ui.Cmd, ui.KeyO):
+		a.chooseImport()
+	case c.Shortcut(ui.Cmd, ui.KeyF):
+		a.section = sectionLibrary
+		if len(a.config.Media) > 0 {
+			a.focus = focusSearch
+		}
+	}
 	current = lookFor(a.prefs.Glass)
 	t := a.prefs.theme(c.Theme(), c.Preferences())
 	t.Radius = 7
@@ -148,11 +165,15 @@ func (a *application) sidebar(c *ui.Context) {
 		ui.Text(c, "本地视频壁纸").FontSize(12).TextColor(t.TextMuted)
 	})
 	ui.Column(c).Grow(1).Children(func() {
+		setBadge, setAccent := "", false
+		if updateAvailable() != "" {
+			setBadge, setAccent = "新版本", true
+		}
 		glassNav(c, &a.section, []navItem{
-			{sectionLibrary, iconLibrary, "资料库", strconv.Itoa(len(a.config.Media))},
-			{sectionPlay, iconPlaylist, "播放与显示器", strconv.Itoa(len(a.config.Playlist.VideoIDs))},
-			{sectionNearby, iconNearby, "附近的 Mac", a.nearbyBadge()},
-			{sectionSetting, iconSettings, "设置", ""},
+			{id: sectionLibrary, icon: iconLibrary, label: "资料库", badge: strconv.Itoa(len(a.config.Media))},
+			{id: sectionPlay, icon: iconPlaylist, label: "播放与显示器", badge: strconv.Itoa(len(a.config.Playlist.VideoIDs))},
+			{id: sectionNearby, icon: iconNearby, label: "附近的 Mac", badge: a.nearbyBadge()},
+			{id: sectionSetting, icon: iconSettings, label: "设置", badge: setBadge, accentBadge: setAccent},
 		})
 	})
 	// Live state of each display, always in view.
