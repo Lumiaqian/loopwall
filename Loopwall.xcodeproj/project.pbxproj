@@ -156,7 +156,7 @@
 			<key>buildSettings</key>
 			<dict>
 				<key>MARKETING_VERSION</key>
-				<string>0.1.5</string>
+				<string>0.1.6</string>
 				<key>CURRENT_PROJECT_VERSION</key>
 				<string>29</string>
 				<key>PRODUCT_BUNDLE_IDENTIFIER</key>
@@ -472,7 +472,7 @@
 			<key>buildSettings</key>
 			<dict>
 				<key>MARKETING_VERSION</key>
-				<string>0.1.5</string>
+				<string>0.1.6</string>
 				<key>CURRENT_PROJECT_VERSION</key>
 				<string>29</string>
 				<key>PRODUCT_BUNDLE_IDENTIFIER</key>
