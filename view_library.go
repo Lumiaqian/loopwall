@@ -33,6 +33,13 @@ func (a *application) libraryView(c *ui.Context) {
 	}, func(top float32) {
 		showImport := a.importing && a.importTotal > 0
 		showGuide := len(a.config.Media) > 0 && len(a.displays) > 0 && !a.anyDisplayActive()
+		mediaGrid := func() ui.Element {
+			a.grid.Key = func(i int) any { return a.config.Media[i].ID }
+			a.grid.Label = func(i int) string { return a.config.Media[i].Name }
+			return ui.GridView(c, &a.grid, len(a.config.Media), 220, 214, func(i int) {
+				a.mediaCard(c, a.config.Media[i])
+			}).Gap(18)
+		}
 		empty := func() {
 			emptyState(c, iconFilm, "还没有视频", "把视频或文件夹拖到这里，或点下方按钮导入。支持 MP4、MOV、M4V，原画质复制，不重新编码。", func() {
 				importAction(c)
@@ -52,11 +59,7 @@ func (a *application) libraryView(c *ui.Context) {
 					empty()
 					return
 				}
-				a.grid.Key = func(i int) any { return a.config.Media[i].ID }
-				a.grid.Label = func(i int) string { return a.config.Media[i].Name }
-				ui.GridView(c, &a.grid, len(a.config.Media), 220, 214, func(i int) {
-					a.mediaCard(c, a.config.Media[i])
-				}).Grow(1).MinHeight(0).FillWidth().Gap(18).Padding(8, 24, 24, 24)
+				mediaGrid().Grow(1).MinHeight(0).FillWidth().Padding(8, 24, 24, 24)
 			})
 			return
 		}
@@ -64,11 +67,7 @@ func (a *application) libraryView(c *ui.Context) {
 			empty()
 			return
 		}
-		a.grid.Key = func(i int) any { return a.config.Media[i].ID }
-		a.grid.Label = func(i int) string { return a.config.Media[i].Name }
-		overlay(ui.GridView(c, &a.grid, len(a.config.Media), 220, 214, func(i int) {
-			a.mediaCard(c, a.config.Media[i])
-		})).ScrollbarInsets(top, 0, 0, 0).Gap(18).Padding(top+14, 24, 24, 24)
+		overlay(mediaGrid()).ScrollbarInsets(top, 0, 0, 0).Padding(top+14, 24, 24, 24)
 	})
 }
 
