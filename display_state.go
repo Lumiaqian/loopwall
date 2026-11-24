@@ -1,6 +1,7 @@
 package main
 
 import (
+	"math"
 	"slices"
 	"time"
 
@@ -23,20 +24,45 @@ func (a *application) runtimeFresh() bool {
 }
 
 func (a *application) displayState(key string) displayState {
+	return a.displayStateAt(key, time.Now())
+}
+
+func (a *application) displayStateAt(key string, now time.Time) displayState {
 	var s displayState
-	if !a.runtimeFresh() {
+	if !a.runtime.Fresh(now) {
 		return s
 	}
 	for _, p := range a.runtime.Displays {
 		if p.DisplayKey == key {
 			s.media, s.ok = a.entry(p.VideoID)
-			s.position = p.PositionSeconds
 			inactive := !slices.Contains(a.runtime.ActiveDisplayKeys, key)
 			s.held = inactive && a.runtime.PowerSavingActive
 			s.waiting = inactive && !s.held
+			active := s.ok && !s.held && !s.waiting
+			s.position = extrapolatedPosition(p.PositionSeconds, s.media.DurationSeconds, a.runtime.UpdatedAtUnix, now, active)
 		}
 	}
 	return s
+}
+
+// extrapolatedPosition advances basePos linearly from updatedAtUnix to now
+// while a display is actively playing, wrapping around duration so the
+// UI progress stays smooth between 10s extension heartbeats.
+func extrapolatedPosition(basePos, duration, updatedAtUnix float64, now time.Time, active bool) float64 {
+	if duration <= 0 {
+		return max(0, basePos)
+	}
+	clamped := min(duration, max(0, basePos))
+	if !active || updatedAtUnix <= 0 {
+		return clamped
+	}
+	updatedAt := time.Unix(0, int64(updatedAtUnix*float64(time.Second)))
+	elapsed := now.Sub(updatedAt).Seconds()
+	if elapsed <= 0 {
+		return clamped
+	}
+	elapsed = min(elapsed, catalog.RuntimeStaleAfter.Seconds())
+	return math.Mod(clamped+elapsed, duration)
 }
 
 func (s displayState) color(t *ui.Theme) ui.Color {
