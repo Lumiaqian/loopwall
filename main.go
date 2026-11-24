@@ -220,6 +220,20 @@ func (a *application) commit(edit func(*catalog.Config)) bool {
 	return a.finish(a.update(edit))
 }
 
+// commitQuiet saves and notifies the extension like commit, but only sets
+// a.status when something fails so repeated drag/step reorders stay silent.
+func (a *application) commitQuiet(edit func(*catalog.Config)) bool {
+	if err := a.update(edit); err != nil {
+		a.status = "保存失败：" + err.Error()
+		return false
+	}
+	if err := a.host.NotifyLibraryChanged(); err != nil {
+		a.status = "已保存，通知扩展失败：" + err.Error()
+		return false
+	}
+	return true
+}
+
 // finish says how a save, whose result is err, went, and tells the
 // extension of a saved one.
 func (a *application) finish(err error) bool {

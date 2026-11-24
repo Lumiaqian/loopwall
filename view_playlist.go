@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"math"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -99,13 +100,26 @@ func (a *application) playlistView(c *ui.Context) {
 			})
 			// Order.
 			ui.Column(c).Gap(10).FillWidth().Children(func() {
-				sectionTitle(c, iconList, fmt.Sprintf("播放顺序 · %d", len(a.config.Playlist.VideoIDs)))
+				hasMissing := len(a.missingPlaylistIDs()) > 0
+				ui.Row(c).Gap(8).AlignItems(ui.Center).FillWidth().Children(func() {
+					sectionTitle(c, iconList, fmt.Sprintf("播放顺序 · %d", len(a.config.Playlist.VideoIDs)))
+					ui.Box(c).Grow(1)
+					if hasMissing {
+						glassButton(c, iconPlus, "全部加入轮播", false).OnClick(a.addAllToPlaylist)
+					}
+					if len(a.config.Playlist.VideoIDs) > 0 {
+						glassButton(c, nil, "清空轮播", false).OnClick(a.clearPlaylist)
+					}
+				})
 				if len(a.config.Playlist.VideoIDs) == 0 {
 					group(c, func() {
 						ui.Column(c).Padding(22).Gap(8).Center().FillWidth().Children(func() {
 							ui.Text(c, "列表为空").FontWeight(600)
 							ui.Text(c, "壁纸会保留末帧，前往资料库选择视频加入轮播。").FontSize(12).TextColor(t.TextMuted)
-							ui.Box(c).Margin(4, 0, 0, 0).Children(func() {
+							ui.Row(c).Gap(8).Center().Margin(4, 0, 0, 0).Children(func() {
+								if len(a.config.Media) > 0 {
+									glassButton(c, iconPlus, "全部加入轮播", false).OnClick(a.addAllToPlaylist)
+								}
 								glassButton(c, iconLibrary, "前往资料库", false).OnClick(func() { a.section = sectionLibrary })
 							})
 						})
@@ -130,11 +144,91 @@ func (a *application) playlistView(c *ui.Context) {
 	})
 }
 
+type playlistDrag struct {
+	id   string
+	from int
+}
+
+// moveVideoID returns a copy of ids with element from moved to index to.
+func moveVideoID(ids []string, from, to int) []string {
+	out := slices.Clone(ids)
+	if from < 0 || from >= len(out) || to < 0 || to >= len(out) || from == to {
+		return out
+	}
+	item := out[from]
+	out = slices.Delete(out, from, from+1)
+	out = slices.Insert(out, to, item)
+	return out
+}
+
+func (a *application) reorderPlaylist(from, to int) {
+	if from < 0 || from >= len(a.config.Playlist.VideoIDs) || to < 0 || to >= len(a.config.Playlist.VideoIDs) || from == to {
+		return
+	}
+	a.commitQuiet(func(c *catalog.Config) {
+		c.Playlist.VideoIDs = moveVideoID(c.Playlist.VideoIDs, from, to)
+	})
+}
+
+func (a *application) missingPlaylistIDs() []string {
+	var missing []string
+	for _, m := range a.config.Media {
+		if !slices.Contains(a.config.Playlist.VideoIDs, m.ID) {
+			missing = append(missing, m.ID)
+		}
+	}
+	return missing
+}
+
+func (a *application) addAllToPlaylist() {
+	missing := a.missingPlaylistIDs()
+	if len(missing) == 0 {
+		return
+	}
+	if a.commit(func(c *catalog.Config) {
+		for _, id := range missing {
+			if !slices.Contains(c.Playlist.VideoIDs, id) {
+				c.Playlist.VideoIDs = append(c.Playlist.VideoIDs, id)
+			}
+		}
+	}) {
+		a.status = fmt.Sprintf("已将 %d 个视频加入轮播", len(missing))
+	}
+}
+
+func (a *application) clearPlaylist() {
+	if len(a.config.Playlist.VideoIDs) == 0 {
+		return
+	}
+	if a.commit(func(c *catalog.Config) { c.Playlist.VideoIDs = []string{} }) {
+		a.status = "已清空轮播列表"
+	}
+}
+
 func (a *application) orderRow(c *ui.Context, i, n int, m catalog.MediaEntry) {
 	t := c.Theme()
-	row := ui.Row(c.Key(m.ID)).Gap(12).AlignItems(ui.Center).Padding(8, 12).FillWidth()
+	row := ui.Row(c.Key(m.ID)).Gap(12).AlignItems(ui.Center).Padding(8, 12).FillWidth().
+		Drag(playlistDrag{id: m.ID, from: i})
+	if drag, ok := ui.Drop[playlistDrag](row); ok && drag.from != i {
+		a.reorderPlaylist(drag.from, i)
+	}
+	drag, over := ui.DragOver[playlistDrag](row)
 	hovered := row.Hovered()
+	if row.Dragging() {
+		row.Opacity(0.45)
+	} else if over && drag.from != i {
+		row.Background(t.Accent.Alpha(0.06))
+	}
 	row.Children(func() {
+		if over && drag.from != i {
+			line := ui.Box(c).Absolute().Left(12).Right(12).Height(2).Background(t.Accent)
+			if drag.from > i {
+				line.Top(0)
+			} else {
+				line.Bottom(0)
+			}
+		}
+		ui.Icon(c, iconGrip).FontSize(14).TextColor(t.TextMuted).Cursor(ui.CursorGrab)
 		ui.Text(c, fmt.Sprintf("%02d", i+1)).FontSize(12).FontWeight(600).TextColor(t.TextMuted).Width(20)
 		thumbBox(c, a.thumb(m.ID), 64, 36, 5)
 		ui.Column(c).Gap(1).Grow(1).MinWidth(0).Children(func() {
@@ -146,12 +240,8 @@ func (a *application) orderRow(c *ui.Context, i, n int, m catalog.MediaEntry) {
 			controls.Opacity(1)
 		}
 		controls.Children(func() {
-			iconButton(c, iconUp, "上移").Disabled(i == 0).OnClick(func() {
-				a.commit(func(c *catalog.Config) { ids := c.Playlist.VideoIDs; ids[i-1], ids[i] = ids[i], ids[i-1] })
-			})
-			iconButton(c, iconDown, "下移").Disabled(i == n-1).OnClick(func() {
-				a.commit(func(c *catalog.Config) { ids := c.Playlist.VideoIDs; ids[i+1], ids[i] = ids[i], ids[i+1] })
-			})
+			iconButton(c, iconUp, "上移").Disabled(i == 0).OnClick(func() { a.reorderPlaylist(i, i-1) })
+			iconButton(c, iconDown, "下移").Disabled(i == n-1).OnClick(func() { a.reorderPlaylist(i, i+1) })
 			iconButton(c, iconX, "移出轮播").OnClick(func() { a.togglePlaylist(m.ID) })
 		})
 	})
