@@ -39,6 +39,19 @@ func (a *application) anyDisplayActive() bool {
 	return false
 }
 
+// playingOn names the displays currently actively presenting video id.
+func (a *application) playingOn(id string) []string {
+	now := time.Now()
+	var names []string
+	for _, d := range a.displays {
+		s := a.displayStateAt(d.Identifier, now)
+		if s.ok && !s.waiting && !s.held && s.media.ID == id {
+			names = append(names, d.Name)
+		}
+	}
+	return names
+}
+
 func (a *application) displayStateAt(key string, now time.Time) displayState {
 	var s displayState
 	if !a.runtime.Fresh(now) {
