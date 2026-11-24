@@ -178,15 +178,20 @@ func (a *application) mediaCard(c *ui.Context, m catalog.MediaEntry) {
 		if thumb.Clicked() {
 			a.previewMedia(m)
 		}
-		hovered := thumb.Hovered()
+		var playTarget float32
+		if thumb.Hovered() {
+			playTarget = 1
+		}
+		playK := thumb.AnimateTo("hover-play", playTarget, ui.Smooth)
 		thumb.Children(func() {
 			if bm := a.thumb(m.ID); bm != nil {
 				ui.Image(c, bm).Fill().Fit(ui.Cover)
 			} else {
 				ui.Box(c).Fill().Center().TextColor(t.TextMuted).Children(func() { ui.Icon(c, iconFilm).FontSize(28) })
 			}
-			if hovered {
-				overlay(ui.Box(c)).PassThrough().Center().Children(func() {
+			if playK > 0.01 {
+				scale := 0.86 + 0.14*playK
+				overlay(ui.Box(c)).PassThrough().Center().Opacity(playK).Scale(scale, scale).Children(func() {
 					current.fillControl(c, ui.Box(c).Size(56, 56).Radius(28).Center(), mediaGlass).TextColor(ui.RGB(255, 255, 255)).Children(func() {
 						ui.Icon(c, iconPlay).FontSize(20)
 					})

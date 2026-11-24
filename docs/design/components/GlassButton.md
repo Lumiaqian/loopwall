@@ -14,6 +14,6 @@
 - 点击处理用 `OnClick`；带菜单时用 `.Menu(...)`，菜单由系统原生绘制。
 - 忙碌时 `Disabled(a.busy)`，标签换成「处理中…」这类进行时。
 
-**规格**：内边距 `space-8` × `space-16`，图文间距 `space-6`，`body-strong`，圆角 `radius-capsule`。prominent 的文字用 `on-accent`；注意 `accent` 选橙色或绿色时白字对比不足 3:1。无玻璃档下普通按钮用 `solid-raised` 加 `shadow-raised`。
+**规格**：内边距 `space-8` × `space-16`，图文间距 `space-6`，`body-strong`，圆角 `radius-capsule`。prominent 的文字用 `on-accent`（五种预设强调色均满足 ≥ 3:1 对比度）。无玻璃档下普通按钮用 `solid-raised` 加 `shadow-raised`。
 
 **不要**：把玻璃按钮放在另一块玻璃上叠两层；用颜色以外的方式区分危险操作（删除走系统确认对话框）。

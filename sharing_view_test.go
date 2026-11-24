@@ -36,17 +36,34 @@ func TestShareViewsShowThePairingCode(t *testing.T) {
 	}, 900, 1800)
 	code := srv.PairingCode()
 	first, second := codeLines(code)
-	for _, want := range []string{first, second, "复制", "换一个", "允许旧版 Loopwall 配对", "附近有同名的 Mac，请核对配对码后再配对", legacyTypedWarning} {
+	for _, want := range []string{first, second, "复制", "换一个", "旧版兼容选项", "附近有同名的 Mac，请核对配对码后再配对", legacyTypedWarning} {
 		if _, ok := tt.Find(want); !ok {
 			t.Errorf("the views do not show %q", want)
 		}
 	}
+	if _, ok := tt.Find("允许旧版 Loopwall 配对（不安全）"); ok {
+		t.Error("the legacy toggle is expanded by default while ShareLegacy is off")
+	}
 	if _, ok := tt.Find("旧版配对码"); ok {
 		t.Error("the legacy code is shown while legacy pairing is off")
 	}
-	// Allowed, the six digits are shown, with their warning.
+	// Clicking the disclosure reveals the legacy toggle without turning it on.
+	if err := tt.Click("旧版兼容选项"); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := tt.Find("允许旧版 Loopwall 配对（不安全）"); !ok {
+		t.Error("clicking 旧版兼容选项 did not expand the legacy toggle")
+	}
+	// Allowed, the section stays expanded automatically with its warning and code.
 	a.prefs.ShareLegacy = true
+	a.share.showLegacyPairing = false
 	tt = ui.NewTester(func(c *ui.Context) { a.shareSettings(c) }, 900, 1200)
+	if _, ok := tt.Find("已开启（不安全）"); !ok {
+		t.Error("the enabled legacy state label is not shown")
+	}
+	if _, ok := tt.Find("允许旧版 Loopwall 配对（不安全）"); !ok {
+		t.Error("the legacy toggle did not auto-expand while ShareLegacy is on")
+	}
 	if _, ok := tt.Find("旧版配对码  " + srv.Code()[:3] + " " + srv.Code()[3:]); !ok {
 		t.Error("the legacy code is not shown while legacy pairing is on")
 	}

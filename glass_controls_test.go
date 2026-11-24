@@ -106,11 +106,44 @@ func TestGlassSegmented(t *testing.T) {
 	heldFrames(t, tt, &frames, ax, y)
 }
 
+func TestGlassSegmentedArrowKeys(t *testing.T) {
+	sel, changes := 0, 0
+	tt := ui.NewTester(func(c *ui.Context) {
+		ui.Column(c).Padding(40).Children(func() {
+			if glassSegmented(c, &sel, "模式", false, "甲", "乙", "丙") {
+				changes++
+			}
+		})
+	}, 360, 120)
+	if err := tt.Click("模式：甲"); err != nil {
+		t.Fatal(err)
+	}
+	tt.Advance(time.Second)
+	// Clicking first segment already left sel=0, wait: Click clicks first third of track.
+	// Move via Right, Right, Left, and clamp at bounds.
+	tt.Key(0, ui.KeyRight)
+	tt.Key(0, ui.KeyRight)
+	tt.Key(0, ui.KeyRight) // clamp at 2
+	tt.Advance(time.Second)
+	if sel != 2 {
+		t.Fatalf("after KeyRight x3: sel=%d, want 2", sel)
+	}
+	tt.Key(0, ui.KeyLeft)
+	tt.Advance(time.Second)
+	if sel != 1 || changes == 0 {
+		t.Fatalf("after KeyLeft: sel=%d changes=%d", sel, changes)
+	}
+}
+
 // TestGlassNav checks that a click chooses a page, that Up and Down move
 // the choice while the navigation has the focus, and stop at its ends.
 func TestGlassNav(t *testing.T) {
 	section, changes := "a", 0
-	items := []navItem{{"a", iconLibrary, "甲", "1"}, {"b", iconPlaylist, "乙", ""}, {"c", iconSettings, "丙", ""}}
+	items := []navItem{
+		{id: "a", icon: iconLibrary, label: "甲", badge: "1"},
+		{id: "b", icon: iconPlaylist, label: "乙"},
+		{id: "c", icon: iconSettings, label: "丙"},
+	}
 	tt := ui.NewTester(func(c *ui.Context) {
 		if glassNav(c, &section, items) {
 			changes++
@@ -130,5 +163,28 @@ func TestGlassNav(t *testing.T) {
 	tt.Advance(time.Second)
 	if section != "a" || changes != 3 {
 		t.Fatalf("after the keys: %q, %d changes", section, changes)
+	}
+}
+
+func TestGlassNavIgnoresArrowsWhileTyping(t *testing.T) {
+	section, query := "a", ""
+	items := []navItem{
+		{id: "a", icon: iconLibrary, label: "甲"},
+		{id: "b", icon: iconPlaylist, label: "乙"},
+	}
+	tt := ui.NewTester(func(c *ui.Context) {
+		ui.Row(c).Children(func() {
+			glassNav(c, &section, items)
+			ui.TextInput(c, &query).Width(120).Label("输入框")
+		})
+	}, 400, 160)
+	if err := tt.Click("输入框"); err != nil {
+		t.Fatal(err)
+	}
+	tt.Key(0, ui.KeyDown)
+	tt.Key(0, ui.KeyUp)
+	tt.Advance(time.Second)
+	if section != "a" {
+		t.Fatalf("arrow keys in focused TextInput changed section to %q", section)
 	}
 }
