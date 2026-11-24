@@ -91,17 +91,79 @@ func (a *application) peerSection(c *ui.Context, p share.Peer) {
 		if !paired {
 			group(c, func() {
 				code := s.code(p.Device)
-				groupRow(c, "输入配对码", "在「"+p.Name+"」上打开「设置 → 局域网共享」，输入那里显示的配对码；配对一次，两台都能导入对方的视频。配对码里含有对方的身份，输错或遇到冒充者都会在发送任何内容之前被拦下。", func() {
-					ui.TextInput(c, code).Width(360).Radius(999).Font(codeFont).Label("配对码").Placeholder("XXXX-XXXX-XXXX-XXXX-XXXX-XXXX-XXXX-XXXX").OnSubmit(func() { a.pair(p) })
-					label := "配对"
-					if s.pairing[p.Device] {
-						label = "配对中…"
-					}
-					glassButton(c, iconLink, label, true).Disabled(s.pairing[p.Device] || *code == "").OnClick(func() { a.pair(p) })
+				if clean := sanitizePairingLive(*code); clean != *code {
+					*code = clean
+				}
+				t := c.Theme()
+				var fbKind pairingHintKind
+				var fbText string
+				ui.Column(c).Gap(10).Padding(12, 14).FillWidth().Children(func() {
+					ui.Column(c).Gap(3).FillWidth().Children(func() {
+						ui.Text(c, "输入配对码")
+						ui.Text(c, "在「"+p.Name+"」的「设置 → 局域网共享」查看配对码，配对一次即可双向导入。").
+							FontSize(11).TextColor(t.TextMuted).MaxLines(2)
+					})
+					ui.Row(c).Gap(8).AlignItems(ui.Center).FillWidth().Children(func() {
+						in := ui.TextInput(c, code).Grow(1).MinWidth(0).Radius(999).Font(codeFont).Label("配对码").
+							Placeholder("XXXX-XXXX-XXXX-XXXX-XXXX-XXXX-XXXX-XXXX").
+							OnPaste(func(text string) bool {
+								if text == "" {
+									return false
+								}
+								cleaned := cleanPairingInput(text)
+								if cleaned == text {
+									return false
+								}
+								if s.pasted == nil {
+									s.pasted = map[string]string{}
+								}
+								s.pasted[p.Device] = cleaned
+								return true
+							}).
+							OnSubmit(func() {
+								if _, _, ok := pairingInputFeedback(*code); ok {
+									a.pair(p)
+								}
+							})
+						if v := s.pasted[p.Device]; v != "" {
+							start, end := in.TextSelection()
+							in.ReplaceText(start, end, v)
+							delete(s.pasted, p.Device)
+						}
+						if clean := sanitizePairingLive(*code); clean != *code {
+							*code = clean
+						}
+						glassButton(c, iconClipboard, "粘贴", false).Disabled(s.pairing[p.Device]).OnClick(func() {
+							pasted := cleanPairingInput(c.ReadClipboard())
+							if pasted == "" {
+								a.status = "剪贴板没有内容"
+								return
+							}
+							*code = pasted
+						})
+						var canSubmit bool
+						fbKind, fbText, canSubmit = pairingInputFeedback(*code)
+						label := "配对"
+						if s.pairing[p.Device] {
+							label = "配对中…"
+						}
+						glassButtonKey(c, "pair-"+p.Device, iconLink, label, true).
+							Disabled(s.pairing[p.Device] || !canSubmit).OnClick(func() { a.pair(p) })
+					})
 				})
-				if share.IsLegacyCode(*code) {
+				switch fbKind {
+				case pairingHintWarning:
 					ui.Divider(c)
-					warnRow(c, legacyTypedWarning)
+					warnRow(c, fbText)
+				case pairingHintValid:
+					ui.Divider(c)
+					ui.Row(c).Gap(8).AlignItems(ui.Center).Padding(8, 14).FillWidth().TextColor(t.Success).Children(func() {
+						ui.Icon(c, iconCheck)
+						ui.Text(c, fbText).FontSize(12).Grow(1)
+					})
+				case pairingHintProgress:
+					ui.Divider(c)
+					ui.Text(c, fbText).FontSize(11).TextColor(t.TextMuted).Padding(8, 14)
 				}
 			})
 			return
@@ -228,11 +290,24 @@ func (a *application) shareSettings(c *ui.Context) {
 				})
 				ui.Divider(c)
 				code := s.server.PairingCode()
+				copied := code != "" && s.copiedCode == code && c.Now().Before(s.copiedUntil)
+				if copied {
+					c.After(s.copiedUntil.Sub(c.Now()))
+				}
 				groupRow(c, "配对码", "在另一台 Mac 的「附近的 Mac」中输入；配对后两台都能导入对方的视频。里面含有这台 Mac 的身份，所以别人冒充这台 Mac 时对方会拒绝配对。用过一次或连续输错 5 次后会换新的。", func() {
 					if code != "" {
-						glassButton(c, nil, "复制", false).OnClick(a.copyPairingCode)
+						copyLabel, copyIcon := "复制", iconCopy
+						if copied {
+							copyLabel, copyIcon = "已复制", iconCheck
+						}
+						glassButtonKey(c, "copy-pairing-code", copyIcon, copyLabel, false).OnClick(func() {
+							a.copyPairingCode(c, code)
+						})
 					}
-					glassButton(c, nil, "换一个", false).OnClick(s.server.NewCode)
+					glassButton(c, nil, "换一个", false).OnClick(func() {
+						s.copiedCode = ""
+						s.server.NewCode()
+					})
 				})
 				if code == "" {
 					ui.Text(c, "已失效，请换一个").FontWeight(600).TextColor(t.Warning).Padding(0, 14, 12)
