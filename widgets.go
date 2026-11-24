@@ -72,16 +72,19 @@ func glassPill(c *ui.Context, text string, g glass.Glass, fg ui.Color) ui.Elemen
 func iconButton(c *ui.Context, svg *ui.SVG, label string) ui.Element {
 	t := c.Theme()
 	b := ui.ButtonBase(c.Key(label)).Size(28, 28).Radius(6).Center().TextColor(t.TextMuted).Label(label).Tooltip(label)
-	if b.Hovered() {
+	switch {
+	case b.Pressed():
+		b.Background(t.SurfacePressed).TextColor(t.Text)
+	case b.Hovered():
 		b.Background(t.SurfaceHover).TextColor(t.Text)
 	}
 	b.Children(func() { ui.Icon(c, svg).FontSize(15) })
 	return b
 }
 
-func thumbBox(c *ui.Context, bm *ui.Bitmap, w, h, r float32) {
+func thumbBox(c *ui.Context, bm *ui.Bitmap, w, h, r float32) ui.Element {
 	t := c.Theme()
-	ui.Box(c).Size(w, h).Shrink(0).Radius(r).Clip().Background(t.SurfaceHover).Center().TextColor(t.TextMuted).Children(func() {
+	return ui.Box(c).Size(w, h).Shrink(0).Radius(r).Clip().Background(t.SurfaceHover).Center().TextColor(t.TextMuted).Children(func() {
 		if bm != nil {
 			ui.Image(c, bm).Size(w, h).Fit(ui.Cover)
 		} else {

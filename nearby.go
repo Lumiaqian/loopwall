@@ -42,7 +42,13 @@ func (a *application) nearbyView(c *ui.Context) {
 				if a.prefs.Share && s.status.Advertised {
 					detail += "\n这台 Mac 在其他 Mac 上显示为「" + s.name + "」。"
 				}
-				emptyState(c, iconNearby, "正在查找附近的 Mac…", detail)
+				emptyState(c, iconNearby, "正在查找附近的 Mac…", detail, func() {
+					t := c.Theme()
+					ui.Row(c).Gap(6).AlignItems(ui.Center).TextColor(t.TextMuted).Children(func() {
+						ui.Spinner(c).Label("正在搜索局域网设备")
+						ui.Text(c, "持续扫描局域网中…").FontSize(12)
+					})
+				})
 			default:
 				for _, p := range s.peers {
 					a.peerSection(c, p)
@@ -318,16 +324,47 @@ func (a *application) shareSettings(c *ui.Context) {
 					})
 				}
 				ui.Divider(c)
-				groupRow(c, "允许旧版 Loopwall 配对（不安全）", "0.1.x 的 Loopwall 只会输入 6 位数字，无法核对对方的身份。只在要和旧版配对时临时打开，配对后关掉。", func() {
-					if glassSwitch(c, &a.prefs.ShareLegacy, "允许旧版 Loopwall 配对", false) {
-						a.setLegacyPairing(a.prefs.ShareLegacy)
-					}
-				})
+				expanded := s.showLegacyPairing || a.prefs.ShareLegacy
+				chevron := iconRight
+				if expanded {
+					chevron = iconDown
+				}
+				legacyState := ""
 				if a.prefs.ShareLegacy {
+					legacyState = "已开启（不安全）"
+				}
+				toggle := ui.ButtonBase(c.Key("legacy-disclosure")).FillWidth().Padding(10, 14).Label("旧版兼容选项")
+				switch {
+				case toggle.Pressed():
+					toggle.Background(t.SurfacePressed)
+				case toggle.Hovered():
+					toggle.Background(t.SurfaceHover)
+				}
+				if !a.prefs.ShareLegacy && toggle.Clicked() {
+					s.showLegacyPairing = !s.showLegacyPairing
+				}
+				toggle.Children(func() {
+					ui.Row(c).Gap(8).AlignItems(ui.Center).FillWidth().Children(func() {
+						ui.Icon(c, chevron).FontSize(14).TextColor(t.TextMuted)
+						ui.Text(c, "旧版兼容选项").FontSize(12).TextColor(t.TextMuted).Grow(1)
+						if legacyState != "" {
+							ui.Text(c, legacyState).FontSize(11).FontWeight(600).TextColor(t.Warning)
+						}
+					})
+				})
+				if expanded {
 					ui.Divider(c)
-					warnRow(c, "6 位数字无法识别冒充者：同一网络里的恶意设备可以冒充这台 Mac，骗走输入的数字并拿到资料库的读取权限。")
-					if legacy := s.server.Code(); legacy != "" {
-						ui.Text(c, "旧版配对码  "+legacy[:3]+" "+legacy[3:]).Font(codeFont).FontSize(16).Bold().TextColor(t.Warning).Padding(0, 14, 12)
+					groupRow(c, "允许旧版 Loopwall 配对（不安全）", "0.1.x 的 Loopwall 只会输入 6 位数字，无法核对对方的身份。只在要和旧版配对时临时打开，配对后关掉。", func() {
+						if glassSwitch(c, &a.prefs.ShareLegacy, "允许旧版 Loopwall 配对", false) {
+							a.setLegacyPairing(a.prefs.ShareLegacy)
+						}
+					})
+					if a.prefs.ShareLegacy {
+						ui.Divider(c)
+						warnRow(c, "6 位数字无法识别冒充者：同一网络里的恶意设备可以冒充这台 Mac，骗走输入的数字并拿到资料库的读取权限。")
+						if legacy := s.server.Code(); legacy != "" {
+							ui.Text(c, "旧版配对码  "+legacy[:3]+" "+legacy[3:]).Font(codeFont).FontSize(16).Bold().TextColor(t.Warning).Padding(0, 14, 12)
+						}
 					}
 				}
 			}

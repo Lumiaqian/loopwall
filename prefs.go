@@ -37,8 +37,8 @@ var accents = []struct {
 	{"violet", "紫色", ui.Oklch(0.6, 0.2, 290)},
 	{"blue", "蓝色", ui.Oklch(0.62, 0.17, 255)},
 	{"pink", "粉色", ui.Oklch(0.66, 0.2, 355)},
-	{"orange", "橙色", ui.Oklch(0.72, 0.17, 55)},
-	{"green", "绿色", ui.Oklch(0.68, 0.16, 155)},
+	{"orange", "橙色", ui.Oklch(0.65, 0.17, 50)},
+	{"green", "绿色", ui.Oklch(0.62, 0.15, 155)},
 	{"system", "跟随系统", ui.Color{}},
 }
 
