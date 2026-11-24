@@ -41,12 +41,18 @@ func groupRow(c *ui.Context, title, detail string, control func()) {
 // glassButton is a capsule of interactive glass; prominent tints it with
 // the accent, for the page's main action.
 func glassButton(c *ui.Context, svg *ui.SVG, label string, prominent bool) ui.Element {
+	return glassButtonKey(c, "glass-"+label, svg, label, prominent)
+}
+
+// glassButtonKey is glassButton with a caller-chosen key, so a button whose
+// label changes in place (such as "复制" to "已复制") keeps its identity.
+func glassButtonKey(c *ui.Context, key string, svg *ui.SVG, label string, prominent bool) ui.Element {
 	t := c.Theme()
 	g, fg := glass.Glass{Interactive: true}, t.Text
 	if prominent {
 		g.Tint, fg = t.Accent, t.AccentText
 	}
-	b := current.fillControl(c, ui.ButtonBase(c.Key("glass-"+label)).Padding(8, 16).Gap(6).Radius(999), g).TextColor(fg).Label(label)
+	b := current.fillControl(c, ui.ButtonBase(c.Key(key)).Padding(8, 16).Gap(6).Radius(999), g).TextColor(fg).Label(label)
 	b.Children(func() {
 		if svg != nil {
 			ui.Icon(c, svg)

@@ -38,8 +38,12 @@ type sharing struct {
 	remotes  map[string]*remote       // what each peer shares, by its device
 	pulls    map[string]*pull         // downloads, by "device/id"
 	codes    map[string]*string       // pairing codes being typed, by device
+	pasted   map[string]string        // cleaned multiline paste waiting for ReplaceText, by device
 	pairing  map[string]bool          // pairings under way, by device
 	thumbs   *lru[string, *ui.Bitmap] // peers' thumbnails, by "device/id"
+	// copiedCode and copiedUntil keep transient in-place copy feedback.
+	copiedCode  string
+	copiedUntil time.Time
 	// status is how publishing and browsing fare, as the ticker last read it.
 	status platform.SharingStatus
 }
@@ -103,7 +107,7 @@ func (a *application) setupSharing() {
 		name = "Mac"
 	}
 	a.share = &sharing{store: st, server: share.NewServer(a.root, st), client: share.NewClient(st, name), name: name,
-		remotes: map[string]*remote{}, pulls: map[string]*pull{}, codes: map[string]*string{}, seen: map[string]time.Time{}, pairing: map[string]bool{},
+		remotes: map[string]*remote{}, pulls: map[string]*pull{}, codes: map[string]*string{}, pasted: map[string]string{}, seen: map[string]time.Time{}, pairing: map[string]bool{},
 		thumbs: newLRU[string, *ui.Bitmap](thumbCacheSize)}
 	a.share.server.SetLegacy(a.prefs.ShareLegacy)
 	if a.prefs.Share {
@@ -144,6 +148,7 @@ func (a *application) setSharing(on bool) {
 	a.prefs.Share = on
 	a.savePrefs()
 	if on {
+		a.share.copiedCode = ""
 		a.share.server.NewCode()
 		a.startSharing()
 	} else {
@@ -158,12 +163,15 @@ func (a *application) setLegacyPairing(on bool) {
 	a.share.server.SetLegacy(on)
 }
 
-// copyPairingCode puts the code this Mac shows on the clipboard.
-func (a *application) copyPairingCode() {
-	if code := a.share.server.PairingCode(); code != "" {
-		mygo.Clipboard.WriteText(code)
-		a.status = "已复制配对码"
+// copyPairingCode puts the code this Mac shows on the clipboard and arms
+// transient in-place confirmation for 2 seconds.
+func (a *application) copyPairingCode(c *ui.Context, code string) {
+	if code == "" {
+		return
 	}
+	c.WriteClipboard(code)
+	a.share.copiedCode = code
+	a.share.copiedUntil = c.Now().Add(2 * time.Second)
 }
 
 // findPeers is the ticker's: while browsing, the Macs found, without this
@@ -349,7 +357,8 @@ func (a *application) fetchThumbnails(p share.Peer, items []share.Item) {
 // pair pairs with p by the code typed for it.
 func (a *application) pair(p share.Peer) {
 	s := a.share
-	code := strings.TrimSpace(*s.code(p.Device))
+	code := cleanPairingInput(*s.code(p.Device))
+	*s.code(p.Device) = code
 	if code == "" || s.pairing[p.Device] {
 		return
 	}
@@ -371,6 +380,108 @@ func (a *application) pair(p share.Peer) {
 			a.invalidate()
 		})
 	}()
+}
+
+// cleanPairingInput trims surrounding whitespace and joins multiline pairing
+// codes (such as copying the two displayed rows) cleanly.
+func cleanPairingInput(s string) string {
+	s = strings.ReplaceAll(s, "\r\n", "\n")
+	s = strings.ReplaceAll(s, "\r", "\n")
+	if !strings.Contains(s, "\n") {
+		return strings.TrimSpace(s)
+	}
+	var lines []string
+	hasDash := false
+	for _, line := range strings.Split(s, "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		if strings.Contains(line, "-") {
+			hasDash = true
+		}
+		lines = append(lines, line)
+	}
+	if len(lines) == 0 {
+		return ""
+	}
+	if len(lines) == 1 {
+		return lines[0]
+	}
+	sep := ""
+	if hasDash {
+		sep = "-"
+	}
+	out := strings.Join(lines, sep)
+	for strings.Contains(out, "--") {
+		out = strings.ReplaceAll(out, "--", "-")
+	}
+	return strings.Trim(out, "-")
+}
+
+// sanitizePairingLive cleans leading whitespace and line breaks while keeping
+// mid-string spaces as the user types.
+func sanitizePairingLive(s string) string {
+	if strings.ContainsAny(s, "\r\n") {
+		return cleanPairingInput(s)
+	}
+	return strings.TrimLeft(s, " \t")
+}
+
+type pairingHintKind uint8
+
+const (
+	pairingHintNone pairingHintKind = iota
+	pairingHintProgress
+	pairingHintValid
+	pairingHintWarning
+)
+
+// pairingInputFeedback validates raw pairing input live so typos and format
+// errors are shown before pressing Pair.
+func pairingInputFeedback(raw string) (kind pairingHintKind, text string, canSubmit bool) {
+	cleaned := cleanPairingInput(raw)
+	if cleaned == "" {
+		return pairingHintNone, "", false
+	}
+	if share.IsLegacyCode(cleaned) {
+		return pairingHintWarning, legacyTypedWarning, true
+	}
+	compact := strings.NewReplacer(" ", "", "-", "", "\t", "").Replace(cleaned)
+	if compact == "" {
+		return pairingHintNone, "", false
+	}
+	allDigits := true
+	for i := 0; i < len(compact); i++ {
+		ch := compact[i]
+		isDigit := ch >= '0' && ch <= '9'
+		isLetter := (ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z')
+		if !isDigit && !isLetter {
+			return pairingHintWarning, "配对码只能包含字母、数字和连字符", false
+		}
+		if !isDigit {
+			allDigits = false
+		}
+	}
+	n := len(compact)
+	switch {
+	case n == 32:
+		_, err := share.ParsePairCode(cleaned)
+		switch {
+		case err == nil:
+			return pairingHintValid, "配对码格式正确", true
+		case errors.Is(err, share.ErrCodeTypo):
+			return pairingHintWarning, share.ErrCodeTypo.Error(), false
+		default:
+			return pairingHintWarning, share.ErrCodeFormat.Error(), false
+		}
+	case n > 32:
+		return pairingHintWarning, fmt.Sprintf("已输入 %d 位，超出 32 位配对码长度", n), false
+	case allDigits && n < 6:
+		return pairingHintProgress, fmt.Sprintf("已输入 %d / 32 位（旧版为 6 位数字）", n), false
+	default:
+		return pairingHintProgress, fmt.Sprintf("已输入 %d / 32 位", n), false
+	}
 }
 
 // code is the pairing code being typed for device, which a text input

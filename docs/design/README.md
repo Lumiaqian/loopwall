@@ -58,7 +58,7 @@ Loopwall 遵循 Apple 的分层：**功能层**是 Liquid Glass，浮在**内容
 ## 字体
 
 - 只用系统字体 `font-system`（SF Pro + 苹方），不打包字体文件。macOS 上默认字号 13。
-- 层级：`page-title` 20/700 → `app-name` 17/700 → `empty-title` 16/700 → `section-title` 13/700 → `body-strong` 13/600 → `body` 13/400 → `detail` 12 → `caption` 11 → `caption-strong` 11/600。特例：配对码 `pairing-code` 22/700，三位一组。
+- 层级：`page-title` 20/700 → `app-name` 17/700 → `empty-title` 16/700 → `section-title` 13/700 → `body-strong` 13/600 → `body` 13/400 → `detail` 12 → `caption` 11 → `caption-strong` 11/600。特例：配对码 `pairing-code` 20/700，`mono` 等宽字体，四位一组分两行。
 - 名称、元信息单行省略，不折行；说明文字最多两行。
 
 ## 间距、尺寸与圆角
