@@ -7,7 +7,7 @@
 **专为 Apple Silicon Mac 打造的轻量级本地视频动态壁纸与多屏独立轮播应用**
 
 [![macOS 26+](https://img.shields.io/badge/macOS-26%2B%20%28Apple%20Silicon%29-0A84FF?style=flat-square&logo=apple&logoColor=white)](#-下载与安装)
-[![Go 1.27 + Swift 6](https://img.shields.io/badge/Go%201.27%20%2B%20Swift%206-MyGO%20v0.9.0-00ADD8?style=flat-square)](go.mod)
+[![Go 1.27 + Swift 6](https://img.shields.io/badge/Go%201.27%20%2B%20Swift%206-MyGO%20v0.10.0-00ADD8?style=flat-square)](go.mod)
 [![License: MIT](https://img.shields.io/badge/License-MIT-10B981?style=flat-square)](LICENSE)
 [![Build](https://img.shields.io/github/actions/workflow/status/Lumiaqian/loopwall/build.yml?branch=main&style=flat-square&label=Build)](.github/workflows/build.yml)
 [![Release](https://img.shields.io/github/v/release/Lumiaqian/loopwall?style=flat-square&label=Release)](https://github.com/Lumiaqian/loopwall/releases)
@@ -20,7 +20,7 @@
 
 ---
 
-Loopwall 使用 **Go（MyGO `v0.9.0`）原生界面** 管理本地视频资料库、播放规则与局域网共享，并由独立的 **Swift 6 墙纸扩展（`LoopwallExtension`）** 通过 `AVAssetReader → AVSampleBufferDisplayLayer → 远程 CAContext` 原生解码渲染。基于 [Phosphene `v1.11.4`](https://github.com/kageroumado/phosphene/tree/v1.11.4)（保留原 MIT 版权声明），面向 Apple Silicon 与 macOS 26+ 个人使用（当前已在 macOS 27.0.1 实机验证，详见 [真机验证状态](docs/VALIDATION.md)）。
+Loopwall 使用 **Go（MyGO `v0.10.0`）原生界面** 管理本地视频资料库、播放规则与局域网共享，并由独立的 **Swift 6 墙纸扩展（`LoopwallExtension`）** 通过 `AVAssetReader → AVSampleBufferDisplayLayer → 远程 CAContext` 原生解码渲染。基于 [Phosphene `v1.11.4`](https://github.com/kageroumado/phosphene/tree/v1.11.4)（保留原 MIT 版权声明），面向 Apple Silicon 与 macOS 26+ 个人使用（当前已在 macOS 27.0.1 实机验证，详见 [真机验证状态](docs/VALIDATION.md)）。
 
 ## ✨ 核心功能一览
 
@@ -105,7 +105,7 @@ Go 主应用负责 UI 与配置写入，Swift 扩展与原生模块负责视频�
 
 ## 🛠 本地开发与自动化发版
 
-已验证工具链：**Go `1.27.3`**、**Xcode `27.0`**、**MyGO `v0.9.0`**（需先安装 Xcode 命令行工具并完成首次启动配置；格式与静态检查依赖 Homebrew 的 `swiftformat` 与 `swiftlint`）。
+已验证工具链：**Go `1.27.3`**、**Xcode `27.0`**、**MyGO `v0.10.0`**（需先安装 Xcode 命令行工具并完成首次启动配置；格式与静态检查依赖 Homebrew 的 `swiftformat` 与 `swiftlint`）。
 
 ### 本地常用命令
 ```sh
@@ -131,4 +131,4 @@ open "$HOME/Applications/Loopwall.app"
 
 ### 来源与许可
 - **上游基线**：基于 [kageroumado/phosphene](https://github.com/kageroumado/phosphene)（基线提交 `cee21cef52380505d3593872ec53c1b56dc54e6e`，对应 Phosphene `v1.11.4`）。
-- **框架与许可**：界面由 [MyGO](https://github.com/egoist/mygo) `v0.9.0` 驱动；[LICENSE](LICENSE) 保留原作者 MIT 声明并在构建时随本地应用一并打包（`Contents/Resources/LICENSE-Phosphene.txt`）。
+- **框架与许可**：界面由 [MyGO](https://github.com/egoist/mygo) `v0.10.0` 驱动；[LICENSE](LICENSE) 保留原作者 MIT 声明并在构建时随本地应用一并打包（`Contents/Resources/LICENSE-Phosphene.txt`）。
