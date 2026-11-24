@@ -8,7 +8,6 @@ import (
 	"time"
 
 	"github.com/Lumiaqian/loopwall/internal/catalog"
-	"github.com/egoist/mygo/plugins/glass"
 	"github.com/egoist/mygo/ui"
 )
 
@@ -103,9 +102,12 @@ func (a *application) playlistView(c *ui.Context) {
 				sectionTitle(c, iconList, fmt.Sprintf("播放顺序 · %d", len(a.config.Playlist.VideoIDs)))
 				if len(a.config.Playlist.VideoIDs) == 0 {
 					group(c, func() {
-						ui.Column(c).Padding(22).Gap(4).Center().FillWidth().Children(func() {
+						ui.Column(c).Padding(22).Gap(8).Center().FillWidth().Children(func() {
 							ui.Text(c, "列表为空").FontWeight(600)
-							ui.Text(c, "壁纸会保留末帧。在资料库里点 + 加入视频。").FontSize(12).TextColor(t.TextMuted)
+							ui.Text(c, "壁纸会保留末帧，前往资料库选择视频加入轮播。").FontSize(12).TextColor(t.TextMuted)
+							ui.Box(c).Margin(4, 0, 0, 0).Children(func() {
+								glassButton(c, iconLibrary, "前往资料库", false).OnClick(func() { a.section = sectionLibrary })
+							})
 						})
 					})
 					return
@@ -276,13 +278,14 @@ func (a *application) repairBanner(c *ui.Context) {
 		return
 	}
 	t := c.Theme()
-	current.fillControl(c, ui.Row(c).Gap(12).AlignItems(ui.Center).Padding(12, 14).Radius(14).FillWidth(),
-		glass.Glass{Tint: t.Warning.Alpha(0.3)}).Children(func() {
-		ui.Icon(c, iconAlert).FontSize(18).TextColor(t.Warning)
-		ui.Column(c).Gap(2).Grow(1).MinWidth(0).Children(func() {
-			ui.Text(c, "壁纸好像停了").FontWeight(600)
-			ui.Text(c, "系统墙纸服务没有响应。修复会重建它，所有显示器的墙纸会闪一下；锁屏时出现属于正常，没在用本壁纸也可以忽略。").FontSize(11).TextColor(t.TextMuted)
+	current.fillContent(c, ui.Box(c).Radius(14).Clip().FillWidth()).Border(1, t.Warning.Alpha(0.35)).Children(func() {
+		ui.Row(c).Gap(12).AlignItems(ui.Center).Padding(12, 14).FillWidth().Background(t.Warning.Alpha(0.14)).Children(func() {
+			ui.Icon(c, iconAlert).FontSize(18).TextColor(t.Warning)
+			ui.Column(c).Gap(2).Grow(1).MinWidth(0).Children(func() {
+				ui.Text(c, "壁纸好像停了").FontWeight(600)
+				ui.Text(c, "系统墙纸服务没有响应。修复会重建它，所有显示器的墙纸会闪一下；锁屏时出现属于正常，没在用本壁纸也可以忽略。").FontSize(11).TextColor(t.TextMuted)
+			})
+			glassButton(c, nil, "修复壁纸", true).OnClick(func() { a.repairWallpaper("正在重建墙纸服务…", time.Now()) })
 		})
-		glassButton(c, nil, "修复壁纸", true).OnClick(func() { a.repairWallpaper("正在重建墙纸服务…", time.Now()) })
 	})
 }

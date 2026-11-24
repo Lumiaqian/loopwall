@@ -18,20 +18,38 @@ func (a *application) libraryView(c *ui.Context) {
 		}
 	}
 	subtitle := fmt.Sprintf("%d 个视频 · %d 个在轮播中 · 原画质，静音播放", len(a.config.Media), inList)
+	importLabel := "导入视频"
+	if a.importing {
+		importLabel = "导入中…"
+	}
+	importAction := func(c *ui.Context) {
+		glassButton(c, iconImport, importLabel, true).Disabled(a.choosingImport || a.importing).OnClick(a.chooseImport)
+	}
 	pageFrame(c, "资料库", subtitle, func() {
-		label := "导入视频"
-		if a.importing {
-			label = "导入中…"
+		if len(a.config.Media) == 0 {
+			return
 		}
-		glassButton(c, iconImport, label, true).Disabled(a.choosingImport || a.importing).OnClick(a.chooseImport)
+		importAction(c)
 	}, func(top float32) {
-		if a.importing && a.importTotal > 0 {
-			ui.Column(c).FillWidth().Children(func() {
-				ui.Box(c).Padding(top+10, 24, 6, 24).FillWidth().Children(func() {
-					a.importProgressBanner(c)
+		showImport := a.importing && a.importTotal > 0
+		showGuide := len(a.config.Media) > 0 && len(a.displays) > 0 && !a.anyDisplayActive()
+		empty := func() {
+			emptyState(c, iconFilm, "还没有视频", "把视频或文件夹拖到这里，或点下方按钮导入。支持 MP4、MOV、M4V，原画质复制，不重新编码。", func() {
+				importAction(c)
+			})
+		}
+		if showImport || showGuide {
+			ui.Column(c).Fill().Children(func() {
+				ui.Column(c).Padding(top+10, 24, 6, 24).Gap(8).FillWidth().Children(func() {
+					if showImport {
+						a.importProgressBanner(c)
+					}
+					if showGuide {
+						a.wallpaperEnableBanner(c)
+					}
 				})
 				if len(a.config.Media) == 0 {
-					emptyState(c, iconFilm, "还没有视频", "把视频或文件夹拖到这里，或点右上角「导入视频」。支持 MP4、MOV、M4V，原画质复制，不重新编码。")
+					empty()
 					return
 				}
 				a.grid.Key = func(i int) any { return a.config.Media[i].ID }
@@ -43,7 +61,7 @@ func (a *application) libraryView(c *ui.Context) {
 			return
 		}
 		if len(a.config.Media) == 0 {
-			emptyState(c, iconFilm, "还没有视频", "把视频或文件夹拖到这里，或点右上角「导入视频」。支持 MP4、MOV、M4V，原画质复制，不重新编码。")
+			empty()
 			return
 		}
 		a.grid.Key = func(i int) any { return a.config.Media[i].ID }
@@ -51,6 +69,15 @@ func (a *application) libraryView(c *ui.Context) {
 		overlay(ui.GridView(c, &a.grid, len(a.config.Media), 220, 214, func(i int) {
 			a.mediaCard(c, a.config.Media[i])
 		})).ScrollbarInsets(top, 0, 0, 0).Gap(18).Padding(top+14, 24, 24, 24)
+	})
+}
+
+func (a *application) wallpaperEnableBanner(c *ui.Context) {
+	t := c.Theme()
+	current.fillContent(c, ui.Row(c).Gap(12).AlignItems(ui.Center).Padding(10, 14).Radius(14).FillWidth()).Children(func() {
+		ui.Icon(c, iconMonitor).FontSize(16).TextColor(t.Accent)
+		ui.Text(c, "尚未在显示器启用「Loopwall 轮播」，前往系统墙纸设置选择即可开始播放").FontSize(12).Grow(1).MinWidth(0)
+		glassButton(c, iconExternal, "系统墙纸设置", false).OnClick(openWallpaperSettings)
 	})
 }
 
