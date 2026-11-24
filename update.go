@@ -163,13 +163,20 @@ func guardRelaunch() {
 // which the plugin's functions panic: in tests.
 var updatesUsed bool
 
+// availableUpdate reports the latest available version from the updater; tests replace it.
+var availableUpdate = updater.AvailableVersion
+
+func updateAvailable() string {
+	if !updatesUsed {
+		return ""
+	}
+	return availableUpdate()
+}
+
 // updateDetail describes the version running and what the last check found.
 func updateDetail() string {
 	text := "当前版本 " + mygo.App.Version() + " · 每天自动检查一次，有新版本时先询问再安装"
-	if !updatesUsed {
-		return text
-	}
-	if v := updater.AvailableVersion(); v != "" {
+	if v := updateAvailable(); v != "" {
 		text = "有新版本 " + v + "，点「检查更新」安装 · 当前版本 " + mygo.App.Version()
 	}
 	return text

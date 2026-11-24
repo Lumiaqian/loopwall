@@ -51,7 +51,7 @@ Loopwall 遵循 Apple 的分层：**功能层**是 Liquid Glass，浮在**内容
 - 文字只用 `text`、`text-muted`、`text-on-backdrop-muted`。前两者在内容层面板上读；压在背景上的字用后者加 `text-halo`。
 - 控件、悬停、选中、分隔线都用 `text` 的透明着色：`surface`（6%）、`surface-hover`（8%）、`surface-pressed`（12%）、`border`（12%），让下层透出。不要用实色灰。
 - `accent` 是用户选的强调色（默认 `accent-violet`，另有 `accent-blue`、`accent-pink`、`accent-orange`、`accent-green` 或跟随系统）。只用于：主按钮填充、开关开启、侧栏透镜与图标、配对码、「#N 轮播」标签、选中项的勾。一屏里强调色的面积要小。
-- 强调色上的字用 `on-accent`。注意：橙色、绿色加白字低于 3:1，粉色、蓝色只够 3:1，紫色 4.26:1；这些是现有取值，改动前先评估。
+- 强调色上的字用 `on-accent`。五种预设加白字均 ≥ 3:1（橙色 3.43:1、绿色 3.39:1、粉色 3.44:1、蓝色 3.67:1、紫色 4.26:1）。
 - 状态：`success` 正在播放，`warning` 等待系统显示或需要修复，`text-muted` 未启用。状态点总与文字状态同时出现，不单靠颜色区分。
 - 缩略图上不要用实色或 `surface` 底，用 Clear 玻璃加 `media-dim`。
 

@@ -137,6 +137,12 @@ func main() {
 		version := mygo.App.Version()
 		app.checkExtension(app.launchedVersion(version), version)
 		updater.OnInstalled(guardRelaunch)
+		updater.OnChange(func() {
+			mygo.RunOnMain(func() {
+				app.invalidate()
+				app.syncTrayMenu()
+			})
+		})
 		menu, sig := app.buildTrayMenu()
 		tray, err := mygo.NewTray(mygo.TrayOptions{Icon: trayIcon(), IconIsTemplate: true, ToolTip: "Loopwall", Menu: menu})
 		if err != nil {

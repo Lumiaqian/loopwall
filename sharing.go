@@ -44,6 +44,8 @@ type sharing struct {
 	// copiedCode and copiedUntil keep transient in-place copy feedback.
 	copiedCode  string
 	copiedUntil time.Time
+	// showLegacyPairing expands the legacy 6-digit pairing controls when toggled.
+	showLegacyPairing bool
 	// status is how publishing and browsing fare, as the ticker last read it.
 	status platform.SharingStatus
 }

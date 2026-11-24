@@ -21,6 +21,7 @@ var (
 	iconMore      = icon(`<circle cx="5" cy="12" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/>`)
 	iconUp        = icon(`<path d="m18 15-6-6-6 6"/>`)
 	iconDown      = icon(`<path d="m6 9 6 6 6-6"/>`)
+	iconRight     = icon(`<path d="m9 18 6-6-6-6"/>`)
 	iconX         = icon(`<path d="M18 6 6 18M6 6l12 12"/>`)
 	iconImport    = icon(`<path d="M12 3v12M7 10l5 5 5-5"/><path d="M5 21h14"/>`)
 	iconFolder    = icon(`<path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>`)

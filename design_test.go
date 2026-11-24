@@ -127,3 +127,35 @@ func TestDesignTokensMatchCode(t *testing.T) {
 	value("drag-threshold", fmt.Sprintf("%dpx", dragThreshold))
 	value("drag-frame", fmt.Sprintf("%dms", dragFrame.Milliseconds()))
 }
+
+func relativeLuminance(c ui.Color) float64 {
+	lin := func(u uint8) float64 {
+		s := float64(u) / 255
+		if s <= 0.03928 {
+			return s / 12.92
+		}
+		return math.Pow((s+0.055)/1.055, 2.4)
+	}
+	return 0.2126*lin(c.R) + 0.7152*lin(c.G) + 0.0722*lin(c.B)
+}
+
+func contrastRatio(a, b ui.Color) float64 {
+	la, lb := relativeLuminance(a), relativeLuminance(b)
+	if la < lb {
+		la, lb = lb, la
+	}
+	return (la + 0.05) / (lb + 0.05)
+}
+
+func TestAccentContrast(t *testing.T) {
+	base := ui.LightTheme()
+	for _, ac := range accents {
+		if ac.color.A == 0 {
+			continue
+		}
+		fg := base.WithAccent(ac.color).AccentText
+		if ratio := contrastRatio(ac.color, fg); ratio < 3.0 {
+			t.Errorf("accent %s (%s) contrast with on-accent is %.2f:1, want >= 3.0:1", ac.key, ac.label, ratio)
+		}
+	}
+}
