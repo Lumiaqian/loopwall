@@ -143,11 +143,16 @@ func (c Config) Validate() error {
 	return nil
 }
 func Load(root string) (Config, error) {
+	c, err := LoadExisting(root)
+	if os.IsNotExist(err) {
+		return Default(), nil
+	}
+	return c, err
+}
+
+func LoadExisting(root string) (Config, error) {
 	c := Default()
 	b, e := os.ReadFile(filepath.Join(root, "catalog.json"))
-	if os.IsNotExist(e) {
-		return c, nil
-	}
 	if e != nil {
 		return c, e
 	}

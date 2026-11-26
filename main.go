@@ -34,6 +34,7 @@ const (
 )
 
 type application struct {
+	libraryReady   bool
 	host           platform.Host
 	root           string
 	config         catalog.Config
@@ -96,12 +97,16 @@ func main() {
 	app := &application{root: catalog.Root(), section: sectionLibrary}
 	mygo.App.OnWindowAllClosed(func() {})
 	mygo.App.OnActivate(func(visible bool) {
-		if _, importing := importArgs(os.Args[1:], ""); !visible && !importing {
+		if _, importing := importArgs(os.Args[1:], ""); app.libraryReady && !visible && !importing {
 			app.open()
 		}
 	})
 	mygo.App.OnSecondInstance(app.secondInstance)
-	mygo.App.OnOpenURL(func(_ string) { app.open() })
+	mygo.App.OnOpenURL(func(_ string) {
+		if app.libraryReady {
+			app.open()
+		}
+	})
 	mygo.App.WhenReady(func() {
 		// Install after startLocale so MyGo role menus (including the Edit -> Speech submenu)
 		// pick up zh-Hans instead of falling back to English.
@@ -123,87 +128,117 @@ func main() {
 		if err := migrateUserData(); err != nil {
 			migrated = append(migrated, "设置迁移失败："+err.Error())
 		}
-		app.config, err = catalog.Load(app.root)
-		if err != nil {
-			mygo.Dialog.Error("资料库读取失败", err.Error())
-			mygo.App.Quit()
+		config, err := catalog.Load(app.root)
+		if os.IsPermission(err) {
+			go app.requestLibraryAccess(migrated)
 			return
 		}
-		app.interval = strconv.Itoa(app.config.Playlist.IntervalSeconds)
-		app.prefs = loadPrefs()
-		mygo.Theme.SetSource(app.prefs.themeSource())
-		app.login = mygo.App.OpenAtLogin()
-		if paths, importing := importArgs(os.Args[1:], ""); importing {
-			app.importPaths(paths, func(imported int, errs []string) {
-				app.writeImportResult(imported, errs)
-				mygo.App.Quit()
-			})
-			return
-		}
-		app.reapLater()
-		if len(migrated) > 0 {
-			app.status = strings.Join(migrated, "；")
-			if err := app.host.NotifyLibraryChanged(); err != nil {
-				log.Println(err)
-			}
-		}
-		app.setupSharing()
-		// Install updates only when asked, then relaunch at once, so the
-		// wallpaper's extension never waits on a bundle replaced unseen.
-		updater.SetAutomaticDownloads(false)
-		version := mygo.App.Version()
-		app.checkExtension(version)
-		updater.OnInstalled(guardRelaunch)
-		updater.OnChange(func() {
-			mygo.RunOnMain(func() {
-				app.invalidate()
-				app.syncTrayMenu()
-			})
-		})
-		menu, sig := app.buildTrayMenu()
-		tray, err := mygo.NewTray(mygo.TrayOptions{Icon: trayIcon(), IconIsTemplate: true, ToolTip: "Loopwall", Menu: menu})
-		if err != nil {
-			log.Println(err)
-		} else {
-			app.tray = tray
-			app.traySig = sig
-		}
-		if !mygo.App.WasOpenedAtLogin() {
-			app.open()
-		}
-		go func() {
-			for range time.NewTicker(2 * time.Second).C {
-				r, _ := catalog.ReadRuntime(app.root)
-				displays, err := app.host.Displays()
-				stuck, _ := app.host.AgentStuckSignals()
-				peers, browsing := app.findPeers()
-				var sharingStatus platform.SharingStatus
-				if app.share != nil {
-					sharingStatus, _ = app.host.SharingStatus()
-				}
-				mygo.RunOnMain(func() {
-					if browsing {
-						app.setPeers(peers)
-					}
-					if app.share != nil {
-						app.share.status = sharingStatus
-					}
-					app.runtime = r
-					if err == nil {
-						app.displays = displays
-					}
-					app.observeWallpaper(r, stuck, time.Now())
-					app.syncTrayMenu()
-					if app.window != nil {
-						app.window.Invalidate()
-					}
-				})
-			}
-		}()
+		app.finishLibraryLoad(config, err, migrated)
 	})
 	if err := mygo.App.Run(); err != nil {
 		log.Fatal(err)
 	}
+}
+
+func (app *application) requestLibraryAccess(migrated []string) {
+	paths, err := mygo.Dialog.Open(mygo.OpenDialogOptions{
+		Title: "打开原壁纸资料库", Message: "请选择扩展原有的 Documents 文件夹：" + app.root,
+		DefaultPath: app.root, Directory: true, ButtonLabel: "使用原资料库",
+	})
+	if err == nil && len(paths) == 0 {
+		mygo.RunOnMain(func() { mygo.App.Quit() })
+		return
+	}
+	var config catalog.Config
+	if err == nil {
+		if len(paths) != 1 || filepath.Clean(paths[0]) != app.root {
+			err = fmt.Errorf("请选择原资料库目录 %s", app.root)
+		} else {
+			config, err = catalog.LoadExisting(app.root)
+		}
+	}
+	mygo.RunOnMain(func() { app.finishLibraryLoad(config, err, migrated) })
+}
+
+func (app *application) finishLibraryLoad(config catalog.Config, err error, migrated []string) {
+	if err != nil {
+		mygo.Dialog.Error("资料库读取失败", err.Error())
+		mygo.App.Quit()
+		return
+	}
+	app.config = config
+	app.libraryReady = true
+	app.interval = strconv.Itoa(app.config.Playlist.IntervalSeconds)
+	app.prefs = loadPrefs()
+	mygo.Theme.SetSource(app.prefs.themeSource())
+	app.login = mygo.App.OpenAtLogin()
+	if paths, importing := importArgs(os.Args[1:], ""); importing {
+		app.importPaths(paths, func(imported int, errs []string) {
+			app.writeImportResult(imported, errs)
+			mygo.App.Quit()
+		})
+		return
+	}
+	app.reapLater()
+	if len(migrated) > 0 {
+		app.status = strings.Join(migrated, "；")
+		if err := app.host.NotifyLibraryChanged(); err != nil {
+			log.Println(err)
+		}
+	}
+	app.setupSharing()
+	// Install updates only when asked, then relaunch at once, so the
+	// wallpaper's extension never waits on a bundle replaced unseen.
+	updater.SetAutomaticDownloads(false)
+	version := mygo.App.Version()
+	app.checkExtension(version)
+	updater.OnInstalled(guardRelaunch)
+	updater.OnChange(func() {
+		mygo.RunOnMain(func() {
+			app.invalidate()
+			app.syncTrayMenu()
+		})
+	})
+	menu, sig := app.buildTrayMenu()
+	tray, err := mygo.NewTray(mygo.TrayOptions{Icon: trayIcon(), IconIsTemplate: true, ToolTip: "Loopwall", Menu: menu})
+	if err != nil {
+		log.Println(err)
+	} else {
+		app.tray = tray
+		app.traySig = sig
+	}
+	if !mygo.App.WasOpenedAtLogin() {
+		app.open()
+	}
+	go func() {
+		for range time.NewTicker(2 * time.Second).C {
+			r, _ := catalog.ReadRuntime(app.root)
+			displays, err := app.host.Displays()
+			stuck, _ := app.host.AgentStuckSignals()
+			peers, browsing := app.findPeers()
+			var sharingStatus platform.SharingStatus
+			if app.share != nil {
+				sharingStatus, _ = app.host.SharingStatus()
+			}
+			mygo.RunOnMain(func() {
+				if browsing {
+					app.setPeers(peers)
+				}
+				if app.share != nil {
+					app.share.status = sharingStatus
+				}
+				app.runtime = r
+				if err == nil {
+					app.displays = displays
+				}
+				app.observeWallpaper(r, stuck, time.Now())
+				app.syncTrayMenu()
+				if app.window != nil {
+					app.window.Invalidate()
+				}
+			})
+		}
+	}()
 }
 func (a *application) open() {
 	if a.host == nil {
@@ -523,10 +558,13 @@ func (a *application) writeImportResult(imported int, errs []string) {
 func (a *application) secondInstance(args []string, workingDir string) {
 	paths, importing := importArgs(args, workingDir)
 	if !importing {
+		if !a.libraryReady {
+			return
+		}
 		a.open()
 		return
 	}
-	if a.host == nil {
+	if !a.libraryReady {
 		a.writeImportResult(0, []string{"管理端尚未就绪，请稍后重试"})
 		return
 	}
