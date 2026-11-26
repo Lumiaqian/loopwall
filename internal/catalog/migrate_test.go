@@ -107,3 +107,40 @@ func TestMigrateResumes(t *testing.T) {
 		}
 	}
 }
+
+func TestDeniedDestinationThenRecovery(t *testing.T) {
+	parent := t.TempDir()
+	root := filepath.Join(parent, "library")
+	from := filepath.Join(parent, "old")
+	for _, dir := range []string{root, from} {
+		if err := os.Mkdir(dir, 0700); err != nil {
+			t.Fatal(err)
+		}
+		c := Default()
+		if dir == root {
+			c.Revision = 42
+		}
+		if err := Save(dir, &c); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.Chmod(root, 0); err != nil {
+		t.Fatal(err)
+	}
+	defer os.Chmod(root, 0700)
+	if _, err := Load(root); !os.IsPermission(err) {
+		t.Fatalf("load: %v", err)
+	}
+	if moved, err := Migrate(from, root); moved || !os.IsPermission(err) {
+		t.Fatalf("migration: %v %v", moved, err)
+	}
+	if err := os.Chmod(root, 0700); err != nil {
+		t.Fatal(err)
+	}
+	if moved, err := Migrate(from, root); moved || err != nil {
+		t.Fatalf("recovery: %v %v", moved, err)
+	}
+	if c, err := Load(root); err != nil || c.Revision != 43 {
+		t.Fatalf("catalog: %v %v", c.Revision, err)
+	}
+}
