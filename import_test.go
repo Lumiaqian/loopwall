@@ -53,7 +53,17 @@ func TestVideoFiles(t *testing.T) {
 
 // TestDropImports checks that files dropped anywhere on the window go to
 // the import: none of them a video, it says so; while one runs, it waits.
+func importCallbacks(t *testing.T) <-chan func() {
+	t.Helper()
+	callbacks := make(chan func(), 1)
+	original := importOnMain
+	importOnMain = func(f func()) { callbacks <- f }
+	t.Cleanup(func() { importOnMain = original })
+	return callbacks
+}
+
 func TestDropImports(t *testing.T) {
+	callbacks := importCallbacks(t)
 	dir := t.TempDir()
 	touch(t, dir, "notes.txt")
 	a := &application{root: t.TempDir(), host: &fakeHost{}, section: sectionSetting}
@@ -66,6 +76,13 @@ func TestDropImports(t *testing.T) {
 	}, 1000, 700)
 	if !tt.DropFiles(600, 400, filepath.Join(dir, "notes.txt")) {
 		t.Fatal("the window did not take the files")
+	}
+	if !a.importing {
+		t.Fatal("scan did not reserve the import slot")
+	}
+	(<-callbacks)()
+	if a.importing {
+		t.Fatal("empty scan retained the import slot")
 	}
 	tt.Frame()
 	if !strings.Contains(status, "没有可导入的视频") {
