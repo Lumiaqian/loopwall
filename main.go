@@ -141,23 +141,59 @@ func main() {
 }
 
 func (app *application) requestLibraryAccess(migrated []string) {
-	paths, err := mygo.Dialog.Open(mygo.OpenDialogOptions{
-		Title: "打开原壁纸资料库", Message: "请选择扩展原有的 Documents 文件夹：" + app.root,
-		DefaultPath: app.root, Directory: true, ButtonLabel: "使用原资料库",
-	})
-	if err == nil && len(paths) == 0 {
-		mygo.RunOnMain(func() { mygo.App.Quit() })
+	expected := app.root
+	message := "请选择扩展原有的 Documents 文件夹：" + expected
+	for {
+		paths, err := mygo.Dialog.Open(mygo.OpenDialogOptions{
+			Title: "打开原壁纸资料库", Message: message, DefaultPath: expected,
+			Directory: true, ButtonLabel: "使用原资料库",
+		})
+		if err != nil {
+			mygo.RunOnMain(func() { app.finishLibraryLoad(catalog.Config{}, err, migrated) })
+			return
+		}
+		if len(paths) == 0 {
+			mygo.RunOnMain(func() { mygo.App.Quit() })
+			return
+		}
+		selected, err := selectedLibraryDirectory(expected, paths)
+		if err != nil {
+			message = fmt.Sprintf("%v\n请选择原资料库目录 %s，或取消以退出。", err, expected)
+			continue
+		}
+		config, err := catalog.LoadExisting(selected)
+		mygo.RunOnMain(func() {
+			if err == nil {
+				app.root = selected
+			}
+			app.finishLibraryLoad(config, err, migrated)
+		})
 		return
 	}
-	var config catalog.Config
-	if err == nil {
-		if len(paths) != 1 || filepath.Clean(paths[0]) != app.root {
-			err = fmt.Errorf("请选择原资料库目录 %s", app.root)
-		} else {
-			config, err = catalog.LoadExisting(app.root)
+}
+
+func selectedLibraryDirectory(expected string, paths []string) (string, error) {
+	if len(paths) != 1 {
+		return "", fmt.Errorf("需要选择一个目录，当前选择：%q", paths)
+	}
+	selected := paths[0]
+	info, err := os.Stat(selected)
+	if err != nil {
+		return "", err
+	}
+	if !info.IsDir() {
+		return "", fmt.Errorf("所选路径不是目录：%s", selected)
+	}
+	if selected != expected {
+		original, err := os.Stat(expected)
+		if err != nil {
+			return "", fmt.Errorf("已选择 %s，无法核实原目录：%w", selected, err)
+		}
+		if !os.SameFile(info, original) {
+			return "", fmt.Errorf("已选择其他目录：%s", selected)
 		}
 	}
-	mygo.RunOnMain(func() { app.finishLibraryLoad(config, err, migrated) })
+	return selected, nil
 }
 
 func (app *application) finishLibraryLoad(config catalog.Config, err error, migrated []string) {
