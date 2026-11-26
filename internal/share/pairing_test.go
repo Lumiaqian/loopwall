@@ -311,3 +311,32 @@ func TestTokenAloneIsNotEnough(t *testing.T) {
 		t.Errorf("the grant to the server: %+v, want it bound to %s", g, fp)
 	}
 }
+
+func TestConcurrentCodeConsumption(t *testing.T) {
+	root, _ := library(t)
+	server, _, peer := serve(t, root)
+	code := server.PairingCode()
+	start := make(chan struct{})
+	const attempts = 4
+	results := make(chan error, attempts)
+	for range attempts {
+		client := NewClient(open(t), "test")
+		go func() {
+			<-start
+			results <- client.Pair(context.Background(), peer, code)
+		}()
+	}
+	close(start)
+	successes := 0
+	for range attempts {
+		err := <-results
+		if err == nil {
+			successes++
+		} else if !errors.Is(err, ErrWrongCode) {
+			t.Fatal(err)
+		}
+	}
+	if successes != 1 {
+		t.Fatalf("one code authorized %d clients", successes)
+	}
+}

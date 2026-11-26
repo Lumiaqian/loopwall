@@ -112,13 +112,21 @@ func NewServer(root string, store *Store) *Server {
 
 // NewCode turns the pairing code over.
 func (s *Server) NewCode() {
-	n, err := rand.Int(rand.Reader, big.NewInt(1_000_000))
-	if err != nil {
-		panic(err)
-	}
 	s.mu.Lock()
-	s.code, s.failures = fmt.Sprintf("%06d", n.Int64()), 0
-	s.mu.Unlock()
+	defer s.mu.Unlock()
+	s.rotateCodeLocked()
+}
+
+func (s *Server) rotateCodeLocked() {
+	previous := s.code
+	for s.code == previous {
+		n, err := rand.Int(rand.Reader, big.NewInt(1_000_000))
+		if err != nil {
+			panic(err)
+		}
+		s.code = fmt.Sprintf("%06d", n.Int64())
+	}
+	s.failures = 0
 }
 
 // Code is the one-time secret, six digits, empty once too many wrong ones
@@ -269,7 +277,9 @@ func (s *Server) pair(w http.ResponseWriter, r *http.Request) {
 	}
 	s.mu.Lock()
 	ok := s.code != "" && subtle.ConstantTimeCompare([]byte(req.Code), []byte(s.code)) == 1
-	if !ok && s.code != "" {
+	if ok {
+		s.rotateCodeLocked()
+	} else if s.code != "" {
 		if s.failures++; s.failures >= maxFailures {
 			s.code = ""
 		}
@@ -297,7 +307,6 @@ func (s *Server) pair(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	s.NewCode() // one code, one pairing
 	writeJSON(w, pairResponse{Token: token})
 }
 
