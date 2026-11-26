@@ -182,3 +182,27 @@ func TestRelaunchGuard(t *testing.T) {
 		t.Errorf("opened %q after giving up", got)
 	}
 }
+
+func TestVersionSaveFailureSkipsRestart(t *testing.T) {
+	original := writePrefs
+	defer func() { writePrefs = original }()
+	writePrefs = func(p prefs) error { return errors.New("disk full") }
+	a := application{prefs: prefs{LastVersion: "0.1.6"}}
+	restarts := 0
+	oldRestart := restartAgent
+	defer func() { restartAgent = oldRestart }()
+	restartAgent = func() error { restarts++; return nil }
+	a.finishRegistration("0.1.7", nil)
+	if restarts != 0 || a.prefs.LastVersion != "0.1.6" || a.status == "" {
+		t.Fatal("restarted despite failed version write")
+	}
+	writePrefs = func(p prefs) error { return nil }
+	a.finishRegistration("0.1.7", errors.New("registration failed"))
+	if restarts != 0 || a.prefs.LastVersion != "0.1.6" {
+		t.Fatal("restarted despite failed registration")
+	}
+	a.finishRegistration("0.1.7", nil)
+	if restarts != 1 || a.prefs.LastVersion != "0.1.7" {
+		t.Fatal("update failed to recover")
+	}
+}

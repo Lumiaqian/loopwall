@@ -152,7 +152,7 @@ func main() {
 		// wallpaper's extension never waits on a bundle replaced unseen.
 		updater.SetAutomaticDownloads(false)
 		version := mygo.App.Version()
-		app.checkExtension(app.launchedVersion(version), version)
+		app.checkExtension(version)
 		updater.OnInstalled(guardRelaunch)
 		updater.OnChange(func() {
 			mygo.RunOnMain(func() {
