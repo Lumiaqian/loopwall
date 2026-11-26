@@ -1,0 +1,28 @@
+# Wrapping style
+--wraparguments before-first
+--wrapparameters before-first
+--wrapcollections before-first
+
+# Attribute placement
+--funcattributes prev-line
+--typeattributes prev-line
+
+# Enabled rules
+--enable blankLineAfterImports,blockComments,wrapEnumCases,wrapSingleLineComments
+
+# Disabled rules
+# redundantSelf: strips `self.` that closures need for explicit capture (build-breaking here).
+# initCoderUnavailable: marks required init?(coder:) @available(*,unavailable), breaking NSCoding shims.
+--disable wrapMultilineStatementBraces,wrapMultilineConditionalAssignment,blankLinesBetweenScopes,redundantInternal,redundantSelf,initCoderUnavailable
+
+# Header stripping
+--header strip
+
+# Numeric formatting
+--decimalgrouping 3
+
+# Import grouping
+--importgrouping testable-last
+
+# Preserve indentation on empty lines
+--trimwhitespace nonblank
