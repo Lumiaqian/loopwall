@@ -26,6 +26,9 @@ func (a *application) nearbyView(c *ui.Context) {
 	pageFrame(c, "附近的 Mac", "从同一网络中开启了共享的 Mac 导入视频，原画质复制到本机", nil, func(top float32) {
 		scrollBody(c, top, 0, func() {
 			s := a.share
+			if s != nil && (s.prompt.Kind == "verify" || s.prompt.Kind == "approved") {
+				a.verifyNearbyView(c)
+			}
 			switch {
 			case s == nil:
 				emptyState(c, iconNearby, "局域网共享不可用", "无法读取共享设置，请重新打开 App。")
@@ -94,6 +97,25 @@ func (a *application) peerSection(c *ui.Context, p share.Peer) {
 			warnRow(c, "旧版配对（不安全）：这台 Mac 的身份没有校验过，可能被冒充。建议取消配对，用它显示的新配对码重新配对。")
 		}
 		if !paired {
+			if s.nearby != nil {
+				glassButton(c, iconLink, "核对短码配对", true).Disabled(s.selected.Device != "" || s.prompt.Attempt != "").OnClick(func() {
+					if err := s.nearby.Request(p.Device); err != nil {
+						a.status = err.Error()
+						return
+					}
+					s.selected = p
+				})
+				glassButton(c, nil, "使用完整码或旧版配对", false).OnClick(func() {
+					if s.manualPeer == p.Device {
+						s.manualPeer = ""
+					} else {
+						s.manualPeer = p.Device
+					}
+				})
+				if s.manualPeer != p.Device {
+					return
+				}
+			}
 			group(c, func() {
 				code := s.code(p.Device)
 				if clean := sanitizePairingLive(*code); clean != *code {
@@ -104,13 +126,13 @@ func (a *application) peerSection(c *ui.Context, p share.Peer) {
 				var fbText string
 				ui.Column(c).Gap(10).Padding(12, 14).FillWidth().Children(func() {
 					ui.Column(c).Gap(3).FillWidth().Children(func() {
-						ui.Text(c, "输入配对码")
-						ui.Text(c, "在「"+p.Name+"」的「设置 → 局域网共享」查看配对码，配对一次即可双向导入。").
+						ui.Text(c, "粘贴或输入配对码")
+						ui.Text(c, "在「"+p.Name+"」的「设置 → 局域网共享」复制配对码。支持通用剪贴板时，在这里点「粘贴」，再点「配对」。").
 							FontSize(11).TextColor(t.TextMuted).MaxLines(2)
 					})
 					ui.Row(c).Gap(8).AlignItems(ui.Center).FillWidth().Children(func() {
 						in := ui.TextInput(c, code).Grow(1).MinWidth(0).Radius(999).Font(codeFont).Label("配对码").
-							Placeholder("XXXX-XXXX-XXXX-XXXX-XXXX-XXXX-XXXX-XXXX").
+							Placeholder("粘贴或输入完整配对码").
 							OnPaste(func(text string) bool {
 								if text == "" {
 									return false
@@ -302,7 +324,7 @@ func (a *application) shareSettings(c *ui.Context) {
 				if copied {
 					c.After(s.copiedUntil.Sub(c.Now()))
 				}
-				groupRow(c, "配对码", "在另一台 Mac 的「附近的 Mac」中输入；配对后两台都能导入对方的视频。里面含有这台 Mac 的身份，所以别人冒充这台 Mac 时对方会拒绝配对。用过一次或连续输错 5 次后会换新的。", func() {
+				groupRow(c, "配对码", "推荐在另一台 Mac 的「附近的 Mac」点「核对短码配对」，然后在两台 Mac 上确认。旧版可用这里的完整码，用过一次或连续输错 5 次后失效。", func() {
 					if code != "" {
 						copyLabel, copyIcon := "复制", iconCopy
 						if copied {
@@ -320,6 +342,15 @@ func (a *application) shareSettings(c *ui.Context) {
 				if code == "" {
 					ui.Text(c, "已失效，请换一个").FontWeight(600).TextColor(t.Warning).Padding(0, 14, 12)
 				} else {
+					label := "显示完整配对码"
+					if s.showManualCode {
+						label = "收起完整配对码"
+					}
+					glassButtonKey(c, "manual-pairing-code", nil, label, false).OnClick(func() {
+						s.showManualCode = !s.showManualCode
+					})
+				}
+				if code != "" && s.showManualCode {
 					first, second := codeLines(code)
 					ui.Column(c).Gap(4).Padding(0, 14, 12).Children(func() {
 						ui.Text(c, first).Font(codeFont).FontSize(20).Bold().TextColor(t.Accent).Selectable()

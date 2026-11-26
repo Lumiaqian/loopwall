@@ -36,6 +36,12 @@ func TestShareViewsShowThePairingCode(t *testing.T) {
 	}, 900, 1800)
 	code := srv.PairingCode()
 	first, second := codeLines(code)
+	if _, ok := tt.Find(first); ok {
+		t.Fatal("manual code visible before disclosure")
+	}
+	if err := tt.Click("显示完整配对码"); err != nil {
+		t.Fatal(err)
+	}
 	for _, want := range []string{first, second, "复制", "换一个", "旧版兼容选项", "附近有同名的 Mac，请核对配对码后再配对", legacyTypedWarning} {
 		if _, ok := tt.Find(want); !ok {
 			t.Errorf("the views do not show %q", want)

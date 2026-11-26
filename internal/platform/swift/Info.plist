@@ -7,6 +7,7 @@
     <key>NSBonjourServices</key>
     <array>
         <string>_loopwall._tcp</string>
+        <string>_9C90E62BB772._tcp</string>
     </array>
 </dict>
 </plist>
