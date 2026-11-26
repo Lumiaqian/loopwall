@@ -65,7 +65,9 @@ jobs:
 
       - name: Lint
         run: |
-          test -z "$(gofmt -l .)"
+          git ls-files -z -- '*.go' | xargs -0 gofmt -l > "$RUNNER_TEMP/gofmt-files"
+          cat "$RUNNER_TEMP/gofmt-files"
+          test ! -s "$RUNNER_TEMP/gofmt-files"
           swiftformat --lint .
           swiftlint lint --quiet LoopwallExtension internal/platform/swift/Sources/Platform tests
 
