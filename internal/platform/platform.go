@@ -74,3 +74,22 @@ type Host interface {
 	// silently otherwise, as for a denied local network permission.
 	SharingStatus() (SharingStatus, error)
 }
+
+// NearbyEvent identifies a single verification attempt. Only connected sessions
+// can deliver the credential payload from the other Mac.
+type NearbyEvent struct {
+	Attempt  string
+	Kind     string
+	Device   string
+	Value    string
+	Incoming bool
+}
+
+//mygo:native
+type Nearby interface {
+	Configure(device string, advertise bool, discover bool) error
+	Request(device string) error
+	Decide(attempt string, accept bool) error
+	Send(attempt string, value string) error
+	Next() (NearbyEvent, error)
+}

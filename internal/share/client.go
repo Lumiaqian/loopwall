@@ -66,18 +66,28 @@ func NewClient(store *Store, name string) *Client { return &Client{store: store,
 // answers, and cannot tell an impersonator.
 func (c *Client) Pair(ctx context.Context, peer Peer, code string) error {
 	if IsLegacyCode(code) {
-		return c.pair(ctx, peer, LegacySecret(code), nil)
+		return c.pair(ctx, peer, LegacySecret(code), nil, 0)
 	}
 	pc, err := ParsePairCode(code) // a mistyped code goes nowhere
 	if err != nil {
 		return err
 	}
-	return c.pair(ctx, peer, pc.Secret, &pc)
+	return c.pair(ctx, peer, pc.Secret, pc.Matches, pairVersion)
 }
 
-// pair pairs with peer by secret. want, the long code, is nil for the
-// legacy flow.
-func (c *Client) pair(ctx context.Context, peer Peer, secret string, want *PairCode) (err error) {
+// PairNearby redeems a one-use invitation received over confirmed Nearby
+// Connections. The advertised address is only a route to the pinned certificate.
+func (c *Client) PairNearby(ctx context.Context, peer Peer, fingerprint, ticket string) error {
+	if !hex64(fingerprint) || !hex64(ticket) {
+		return ErrCodeFormat
+	}
+	if prior, ok := c.store.Paired(peer.Device); ok && prior.Verified && prior.Fingerprint != fingerprint {
+		return ErrFingerprintMismatch
+	}
+	return c.pair(ctx, peer, ticket, func(fp string) bool { return fp == fingerprint }, nearbyVersion)
+}
+
+func (c *Client) pair(ctx context.Context, peer Peer, secret string, matches func(string) bool, version int) (err error) {
 	cert, err := c.store.Certificate()
 	if err != nil {
 		return err
@@ -98,7 +108,7 @@ func (c *Client) pair(ctx context.Context, peer Peer, secret string, want *PairC
 	}()
 	var seen string
 	check := func(fp string) error {
-		if want != nil && !want.Matches(fp) {
+		if matches != nil && !matches(fp) {
 			return ErrFingerprintMismatch
 		}
 		return nil
@@ -109,7 +119,7 @@ func (c *Client) pair(ctx context.Context, peer Peer, secret string, want *PairC
 	authenticated := func(fp string) error {
 		seen = fp
 		bound := ""
-		if want != nil {
+		if matches != nil {
 			bound = fp
 		}
 		granted = true
@@ -118,8 +128,8 @@ func (c *Client) pair(ctx context.Context, peer Peer, secret string, want *PairC
 	req := pairRequest{Device: c.store.Device(), Name: c.name, Code: secret,
 		Back: &backAccess{Token: back, Fingerprint: Fingerprint(cert.Certificate[0])}}
 	var clientCert *tls.Certificate
-	if want != nil {
-		req.Version, clientCert = pairVersion, &cert
+	if matches != nil {
+		req.Version, clientCert = version, &cert
 	}
 	hc := httpClient(clientCert, check, authenticated, 15*time.Second)
 	body, _ := json.Marshal(req)
@@ -148,7 +158,7 @@ func (c *Client) pair(ctx context.Context, peer Peer, secret string, want *PairC
 	if err = json.NewDecoder(io.LimitReader(resp.Body, 4096)).Decode(&pr); err != nil || pr.Token == "" || seen == "" {
 		return errors.New("配对失败：对方的回应无效")
 	}
-	return c.store.Pair(peer.Device, Paired{Name: peer.Name, Token: pr.Token, Fingerprint: seen, Verified: want != nil})
+	return c.store.Pair(peer.Device, Paired{Name: peer.Name, Token: pr.Token, Fingerprint: seen, Verified: matches != nil})
 }
 
 // Unpair forgets device both ways: it tells the peer at addr, when it is

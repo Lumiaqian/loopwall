@@ -3,6 +3,7 @@ package share
 import (
 	"context"
 	"crypto/tls"
+	"encoding/json"
 	"errors"
 	"io"
 	"net"
@@ -251,7 +252,7 @@ func TestPairRequestIsBoundToItsCertificate(t *testing.T) {
 	if got := post(t, peer.Addr, &myCert, `{"version":2,"device":"d","code":"`+s.Code()+`"}`); got != http.StatusBadRequest {
 		t.Errorf("no reverse access: %d, want 400", got)
 	}
-	if got := post(t, peer.Addr, &myCert, `{"version":3,"device":"d","code":"`+s.Code()+`"}`); got != http.StatusBadRequest {
+	if got := post(t, peer.Addr, &myCert, `{"version":4,"device":"d","code":"`+s.Code()+`"}`); got != http.StatusBadRequest {
 		t.Errorf("an unknown version: %d, want 400", got)
 	}
 	if !untouched(s, secret) {
@@ -338,5 +339,87 @@ func TestConcurrentCodeConsumption(t *testing.T) {
 	}
 	if successes != 1 {
 		t.Fatalf("one code authorized %d clients", successes)
+	}
+}
+
+func TestNearbyInvitationBindsBothHTTPSPeers(t *testing.T) {
+	ctx := context.Background()
+	rootA, _ := library(t)
+	rootB, _ := library(t)
+	a, storeA, peerA := serve(t, rootA)
+	_, storeB, peerB := serve(t, rootB)
+	fpA, _ := storeA.CertFingerprint()
+	fpB, _ := storeB.CertFingerprint()
+	clientB := NewClient(storeB, "B")
+	ticket, err := a.InviteNearby(storeB.Device(), fpB)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := clientB.PairNearby(ctx, peerA, fpB, ticket); !errors.Is(err, ErrFingerprintMismatch) {
+		t.Fatalf("wrong HTTPS server: %v", err)
+	}
+	if err := NewClient(open(t), "other").PairNearby(ctx, peerA, fpA, ticket); !errors.Is(err, ErrWrongCode) {
+		t.Fatalf("wrong HTTPS client: %v", err)
+	}
+	if len(storeA.Granted()) != 0 || len(storeB.Granted()) != 0 {
+		t.Fatal("identity mismatch left an authorization")
+	}
+	if err := clientB.PairNearby(ctx, peerA, fpA, ticket); err != nil {
+		t.Fatal(err)
+	}
+	if err := clientB.PairNearby(ctx, peerA, fpA, ticket); !errors.Is(err, ErrWrongCode) {
+		t.Fatalf("replayed invitation: %v", err)
+	}
+	if items, err := clientB.Library(ctx, peerA); err != nil || len(items) != 1 {
+		t.Fatalf("B browsing A: %v (%d items)", err, len(items))
+	}
+	if items, err := NewClient(storeA, "A").Library(ctx, peerB); err != nil || len(items) != 1 {
+		t.Fatalf("A browsing B: %v (%d items)", err, len(items))
+	}
+}
+
+func TestNearbyCancelledAndConcurrent(t *testing.T) {
+	root, _ := library(t)
+	server, store, peer := serve(t, root)
+	mine := open(t)
+	fp, _ := mine.CertFingerprint()
+	remoteFP, _ := store.CertFingerprint()
+	client := NewClient(mine, "B")
+	ticket, err := server.InviteNearby(mine.Device(), fp)
+	if err != nil {
+		t.Fatal(err)
+	}
+	server.CancelNearby(ticket)
+	if err := client.PairNearby(context.Background(), peer, remoteFP, ticket); !errors.Is(err, ErrWrongCode) {
+		t.Fatal("cancelled invitation accepted")
+	}
+	ticket, err = server.InviteNearby(mine.Device(), fp)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cert, _ := mine.Certificate()
+	req := pairRequest{Version: nearbyVersion, Device: mine.Device(), Code: ticket, Back: &backAccess{Fingerprint: fp, Token: randomHex(32)}}
+	body, err := json.Marshal(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	start := make(chan struct{})
+	res := make(chan int, 4)
+	for range 4 {
+		go func() { <-start; res <- post(t, peer.Addr, &cert, string(body)) }()
+	}
+	close(start)
+	success := 0
+	for range 4 {
+		switch code := <-res; code {
+		case http.StatusOK:
+			success++
+		case http.StatusForbidden:
+		default:
+			t.Fatalf("unexpected status %d", code)
+		}
+	}
+	if success != 1 {
+		t.Fatalf("accepted %d concurrent redemptions", success)
 	}
 }

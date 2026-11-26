@@ -40,6 +40,7 @@ type Item struct {
 // certificates. A request that names none is of versions before it, whose
 // code is six digits and whose peer is not told from another.
 const pairVersion = 2
+const nearbyVersion = 3
 
 // errHeader names, on a refusal, why, where the status alone cannot:
 // versions before 2 know a 403 as a wrong code and nothing else.
@@ -99,8 +100,39 @@ type Server struct {
 	code        string
 	failures    int
 	allowLegacy bool
+	nearby      nearbyInvitation
 	srv         *http.Server
 	port        int
+}
+
+type nearbyInvitation struct {
+	device, fingerprint, ticket string
+	expires                     time.Time
+}
+
+// InviteNearby is called only with the device and full certificate fingerprint
+// received over an explicitly confirmed Nearby connection.
+func (s *Server) InviteNearby(device, fingerprint string) (string, error) {
+	if device == "" || len(device) > 64 || !hex64(fingerprint) {
+		return "", ErrCodeFormat
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if prior, ok := s.store.Paired(device); ok && prior.Verified && prior.Fingerprint != fingerprint {
+		return "", ErrFingerprintMismatch
+	}
+	ticket := randomHex(32)
+	s.nearby = nearbyInvitation{device, fingerprint, ticket, time.Now().Add(time.Minute)}
+	return ticket, nil
+}
+
+// CancelNearby invalidates an unredeemed invitation from the ended session.
+func (s *Server) CancelNearby(ticket string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.nearby.ticket == ticket {
+		s.nearby = nearbyInvitation{}
+	}
 }
 
 // NewServer makes a server sharing the library at root.
@@ -216,6 +248,7 @@ func (s *Server) Port() int {
 // Stop closes the server and the connections it serves.
 func (s *Server) Stop() error {
 	s.mu.Lock()
+	s.nearby = nearbyInvitation{}
 	srv := s.srv
 	s.srv, s.port = nil, 0
 	s.mu.Unlock()
@@ -255,10 +288,10 @@ func (s *Server) pair(w http.ResponseWriter, r *http.Request) {
 	// request that is not well formed is no guess at it.
 	var bound string // the fingerprint of the client's certificate
 	switch {
-	case req.Version > pairVersion:
+	case req.Version > nearbyVersion:
 		http.Error(w, "unsupported version", http.StatusBadRequest)
 		return
-	case req.Version == pairVersion:
+	case req.Version == pairVersion || req.Version == nearbyVersion:
 		fp, ok := peerFingerprint(r)
 		if b := req.Back; !ok || b == nil || !hex64(b.Token) || b.Fingerprint != fp {
 			http.Error(w, "bad request", http.StatusBadRequest)
@@ -276,12 +309,22 @@ func (s *Server) pair(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.mu.Lock()
-	ok := s.code != "" && subtle.ConstantTimeCompare([]byte(req.Code), []byte(s.code)) == 1
-	if ok {
-		s.rotateCodeLocked()
-	} else if s.code != "" {
-		if s.failures++; s.failures >= maxFailures {
-			s.code = ""
+	var ok bool
+	if req.Version == nearbyVersion {
+		invite := s.nearby
+		ok = invite.device == req.Device && invite.fingerprint == bound && time.Now().Before(invite.expires) && subtle.ConstantTimeCompare([]byte(req.Code), []byte(invite.ticket)) == 1
+		if ok {
+			s.nearby = nearbyInvitation{}
+			s.rotateCodeLocked()
+		}
+	} else {
+		ok = s.code != "" && subtle.ConstantTimeCompare([]byte(req.Code), []byte(s.code)) == 1
+		if ok {
+			s.rotateCodeLocked()
+		} else if s.code != "" {
+			if s.failures++; s.failures >= maxFailures {
+				s.code = ""
+			}
 		}
 	}
 	s.mu.Unlock()

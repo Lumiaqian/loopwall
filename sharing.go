@@ -25,11 +25,15 @@ import (
 // Macs it finds and pulls copies of videos from. Its fields change on the
 // main thread only.
 type sharing struct {
-	store  *share.Store
-	server *share.Server
-	client *share.Client
-	name   string // this Mac's name on the network
-	err    string // why sharing could not start, if it could not
+	nearby       platform.Nearby
+	prompt       platform.NearbyEvent
+	nearbyTicket string
+	selected     share.Peer
+	store        *share.Store
+	server       *share.Server
+	client       *share.Client
+	name         string // this Mac's name on the network
+	err          string // why sharing could not start, if it could not
 
 	// browsing is read by the ticker, off the main thread.
 	browsing atomic.Bool
@@ -42,8 +46,11 @@ type sharing struct {
 	pairing  map[string]bool          // pairings under way, by device
 	thumbs   *lru[string, *ui.Bitmap] // peers' thumbnails, by "device/id"
 	// copiedCode and copiedUntil keep transient in-place copy feedback.
-	copiedCode  string
-	copiedUntil time.Time
+	copiedCode     string
+	copiedUntil    time.Time
+	showManualCode bool
+	manualPeer     string
+
 	// showLegacyPairing expands the legacy 6-digit pairing controls when toggled.
 	showLegacyPairing bool
 	// status is how publishing and browsing fare, as the ticker last read it.
@@ -111,6 +118,7 @@ func (a *application) setupSharing() {
 	a.share = &sharing{store: st, server: share.NewServer(a.root, st), client: share.NewClient(st, name), name: name,
 		remotes: map[string]*remote{}, pulls: map[string]*pull{}, codes: map[string]*string{}, pasted: map[string]string{}, seen: map[string]time.Time{}, pairing: map[string]bool{},
 		thumbs: newLRU[string, *ui.Bitmap](thumbCacheSize)}
+	a.share.nearby, _ = platform.NewNearby()
 	a.share.server.SetLegacy(a.prefs.ShareLegacy)
 	if a.prefs.Share {
 		a.startSharing()
@@ -130,6 +138,9 @@ func (a *application) startSharing() {
 			_ = s.server.Stop()
 		}
 	}
+	if err == nil {
+		a.configureNearby()
+	}
 	if err != nil {
 		s.err = err.Error()
 	}
@@ -142,6 +153,7 @@ func (a *application) stopSharing() {
 	}
 	_ = a.host.StopAdvertising()
 	_ = s.server.Stop()
+	a.configureNearby()
 	s.err = ""
 }
 
@@ -284,6 +296,7 @@ func (a *application) browse() {
 		return
 	}
 	s.browsing.Store(true)
+	a.configureNearby()
 	go func() {
 		peers, ok := a.findPeers()
 		mygo.RunOnMain(func() {

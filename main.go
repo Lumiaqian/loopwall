@@ -294,6 +294,7 @@ func (app *application) finishLibraryLoad(config catalog.Config, err error, migr
 				}
 				if app.share != nil {
 					app.share.status = sharingStatus
+					app.pollNearby()
 				}
 				app.runtime = r
 				if err == nil {
