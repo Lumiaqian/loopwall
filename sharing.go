@@ -148,7 +148,6 @@ func (a *application) stopSharing() {
 // setSharing turns sharing this library on or off, and remembers it.
 func (a *application) setSharing(on bool) {
 	a.prefs.Share = on
-	a.savePrefs()
 	if on {
 		a.share.copiedCode = ""
 		a.share.server.NewCode()
@@ -156,13 +155,21 @@ func (a *application) setSharing(on bool) {
 	} else {
 		a.stopSharing()
 	}
+	a.saveShareSettings()
 }
 
 // setLegacyPairing allows or refuses pairing by six digits, and remembers it.
 func (a *application) setLegacyPairing(on bool) {
 	a.prefs.ShareLegacy = on
-	a.savePrefs()
 	a.share.server.SetLegacy(on)
+	a.saveShareSettings()
+}
+
+func (a *application) saveShareSettings() {
+	a.shareSaveError = ""
+	if err := writePrefs(a.prefs); err != nil {
+		a.shareSaveError = "共享设置已在本次运行生效，但保存失败。重新启动可能恢复原设置：" + err.Error()
+	}
 }
 
 // copyPairingCode puts the code this Mac shows on the clipboard and arms
