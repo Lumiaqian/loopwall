@@ -64,6 +64,7 @@ type application struct {
 	preview        *ui.VideoPlayer
 	previewWindow  *mygo.Window
 	prefs          prefs
+	shareSaveError string
 	share          *sharing // nil when sharing's state could not open
 	// Wallpaper recovery (recovery.go).
 	stuckSignals int64     // the extension's calls for help seen so far
