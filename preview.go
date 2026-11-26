@@ -50,6 +50,7 @@ type previewSession struct {
 	openErr     string
 	timedOut    bool
 	scrubbing   bool
+	sliderRef   ui.Handle
 	stopRedraw  func()
 	closeWin    func()
 	setTitle    func(string)
@@ -199,10 +200,10 @@ func (s *previewSession) view(c *ui.Context) {
 	if c.Shortcut(0, ui.KeySpace) {
 		s.togglePlay()
 	}
-	if c.Shortcut(0, ui.KeyLeft) {
+	if !s.sliderRef.Focused(c) && c.Shortcut(0, ui.KeyLeft) {
 		s.step(-1)
 	}
-	if c.Shortcut(0, ui.KeyRight) {
+	if !s.sliderRef.Focused(c) && c.Shortcut(0, ui.KeyRight) {
 		s.step(1)
 	}
 
@@ -236,7 +237,7 @@ func (s *previewSession) view(c *ui.Context) {
 	root := ui.Box(c).Fill().Background(ui.RGB(0, 0, 0))
 	hovered := root.Hovered()
 	var hudTarget float32
-	if hovered || !ready || !playing || hasErr || s.timedOut || s.scrubbing {
+	if root.FocusWithin() || hovered || !ready || !playing || hasErr || s.timedOut || s.scrubbing {
 		hudTarget = 1
 	}
 	hud := root.AnimateTo("preview-hud", hudTarget, ui.Smooth)
@@ -269,11 +270,7 @@ func (s *previewSession) view(c *ui.Context) {
 			})
 		}
 
-		if hud > 0.01 {
-			s.controlBar(c, hud, ready, playing)
-		} else {
-			s.scrubbing = false
-		}
+		s.controlBar(c, hud, ready, playing)
 	})
 }
 
@@ -337,7 +334,7 @@ func (s *previewSession) controlBar(c *ui.Context, hud float32, ready, playing b
 			}
 			const pad = 7
 			slider := ui.SliderBase(c, &posSec, 0, sliderMax).FillWidth().Height(20).Padding(0, pad).
-				Label("播放进度").Disabled(s.ctrl == nil || !ready || totalSec <= 0)
+				Ref(&s.sliderRef).Label("播放进度").Disabled(s.ctrl == nil || !ready || totalSec <= 0)
 			if slider.Changed() && s.ctrl != nil {
 				s.ctrl.Seek(time.Duration(posSec * float64(time.Second)))
 			}
