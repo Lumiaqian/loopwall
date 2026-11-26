@@ -43,6 +43,18 @@ nonisolated enum PlaylistCadence {
         current != written || now.timeIntervalSince(lastWrite) >= runtimeHeartbeat
     }
 
+    struct WriteBackoff {
+        private var retryAfter = Date.distantPast
+
+        func allowsWrite(at now: Date) -> Bool {
+            now >= retryAfter
+        }
+
+        mutating func failed(at now: Date) {
+            retryAfter = now.addingTimeInterval(runtimeHeartbeat)
+        }
+    }
+
     /// The runtime error line for connections accepted without a verified peer, if any.
     static func unverifiedCallerError(count: Int) -> String? {
         count > 0 ? "有 \(count) 次连接无法验证来源，已放行（系统接口变化？）" : nil

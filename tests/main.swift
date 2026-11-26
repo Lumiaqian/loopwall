@@ -366,3 +366,37 @@ print("PASS: session pruning")
 require(PlaylistCadence.unverifiedCallerError(count: 0) == nil, "no line while every caller was verified")
 require(PlaylistCadence.unverifiedCallerError(count: 3) == "有 3 次连接无法验证来源，已放行（系统接口变化？）", "unverified acceptances are reported with their count")
 print("PASS: unverified caller report")
+
+var creationAttempts = 0
+let recovered = try await retryRendererCreation {
+    creationAttempts += 1
+    if creationAttempts == 1 {
+        throw CocoaError(.fileReadUnknown)
+    }
+    return true
+}
+require(recovered && creationAttempts == 2, "creation recovers from a transient read failure")
+creationAttempts = 0
+do {
+    try await retryRendererCreation {
+        creationAttempts += 1
+        throw CocoaError(.fileReadCorruptFile)
+    }
+    fatalError("corrupt video accepted")
+} catch {
+    require(creationAttempts == 2, "persistent failures have a bounded retry")
+}
+
+let oldTree = NSObject(), newTree = NSObject()
+let oldRoot = ObjectIdentifier(oldTree), newRoot = ObjectIdentifier(newTree)
+var replacementClaim = RendererClaim()
+require(!replacementClaim.reserve(root: oldRoot, expected: newRoot), "stale task cannot reserve a replacement surface")
+require(replacementClaim.reserve(root: newRoot, expected: newRoot), "replacement owns its slot")
+require(!replacementClaim.finish(root: oldRoot), "old completion cannot consume the replacement's slot")
+require(replacementClaim.finish(root: newRoot), "new renderer can still install")
+var backoff = PlaylistCadence.WriteBackoff()
+backoff.failed(at: wroteAt)
+for tick in 0 ..< 100 {
+    require(!backoff.allowsWrite(at: wroteAt.addingTimeInterval(Double(tick) / 10)), "failed writes must wait for a heartbeat")
+}
+require(backoff.allowsWrite(at: wroteAt.addingTimeInterval(10)), "resume writes after one heartbeat")

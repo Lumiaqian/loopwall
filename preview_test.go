@@ -205,3 +205,16 @@ func TestPreviewSessionControlsAndStates(t *testing.T) {
 		t.Fatal("retry did not clear timeout state")
 	}
 }
+
+func TestPreviewKeyboardSeekWithoutHover(t *testing.T) {
+	player := &fakePreviewPlayer{ready: true, playing: true, dur: time.Minute}
+	s := previewSession{ctrl: player}
+	tt := ui.NewTester(s.view, 960, 580)
+	tt.Move(-10, -10)
+	tt.Advance(time.Second)
+	tt.Key(0, ui.KeyTab)
+	tt.Key(0, ui.KeyRight)
+	if len(player.seeks) == 0 || player.pos <= 0 {
+		t.Fatalf("keyboard seek: %v", player.seeks)
+	}
+}

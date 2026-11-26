@@ -64,6 +64,7 @@ type application struct {
 	preview        *ui.VideoPlayer
 	previewWindow  *mygo.Window
 	prefs          prefs
+	shareSaveError string
 	share          *sharing // nil when sharing's state could not open
 	// Wallpaper recovery (recovery.go).
 	stuckSignals int64     // the extension's calls for help seen so far
@@ -151,7 +152,7 @@ func main() {
 		// wallpaper's extension never waits on a bundle replaced unseen.
 		updater.SetAutomaticDownloads(false)
 		version := mygo.App.Version()
-		app.checkExtension(app.launchedVersion(version), version)
+		app.checkExtension(version)
 		updater.OnInstalled(guardRelaunch)
 		updater.OnChange(func() {
 			mygo.RunOnMain(func() {
@@ -415,6 +416,8 @@ func (a *application) finishChooseImport(paths []string, err error) {
 	}
 }
 
+var importOnMain = mygo.RunOnMain
+
 // importPaths imports the videos among paths, chosen or dropped, and in
 // the folders among them, in the background. done, if not nil, is told how
 // many were imported and what went wrong, once, on the main thread. On the
@@ -430,32 +433,32 @@ func (a *application) importPaths(paths []string, done func(imported int, errs [
 		finish(0, []string{a.status})
 		return
 	}
-	videos, skipped := videoFiles(paths, a.root)
-	if len(videos) == 0 {
-		a.status = "没有可导入的视频（支持 MP4、MOV、M4V）"
-		finish(0, []string{a.status})
-		return
-	}
 	a.importing = true
-	a.importDone = 0
-	a.importTotal = len(videos)
-	a.importCurrent = filepath.Base(videos[0])
 	a.section = sectionLibrary
+	a.invalidate()
+	paths = slices.Clone(paths)
 	go func() {
+		videos, skipped := videoFiles(paths, a.root)
+		if len(videos) == 0 {
+			importOnMain(func() {
+				a.importing = false
+				a.status = "没有可导入的视频（支持 MP4、MOV、M4V）"
+				a.invalidate()
+				finish(0, []string{a.status})
+			})
+			return
+		}
 		// The library changes only on the main thread, by what was added:
 		// what changed it meanwhile, as a download, stays.
 		added, errs := a.importFiles(videos, func(doneCount, total int, name string) {
-			if a.window == nil {
-				return
-			}
-			mygo.RunOnMain(func() {
+			importOnMain(func() {
 				a.importDone = doneCount
 				a.importTotal = total
 				a.importCurrent = name
 				a.invalidate()
 			})
 		})
-		mygo.RunOnMain(func() {
+		importOnMain(func() {
 			err := a.addImported(added)
 			saved := a.finish(err)
 			a.importing = false
