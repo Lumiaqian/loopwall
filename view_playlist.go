@@ -386,7 +386,7 @@ func (a *application) repairBanner(c *ui.Context) {
 				ui.Text(c, "壁纸好像停了").FontWeight(600)
 				ui.Text(c, "系统墙纸服务没有响应。修复会重建它，所有显示器的墙纸会闪一下；锁屏时出现属于正常，没在用本壁纸也可以忽略。").FontSize(11).TextColor(t.TextMuted)
 			})
-			glassButton(c, nil, "修复壁纸", true).OnClick(func() { a.repairWallpaper("正在重建墙纸服务…", time.Now()) })
+			glassButton(c, nil, "修复壁纸", true).OnClick(func() { a.startWallpaperRepair() })
 		})
 	})
 }

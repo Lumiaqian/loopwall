@@ -101,13 +101,13 @@ func (a *application) waitingDisplays(r catalog.Runtime) bool {
 // wallpaperStalled reports that the wallpaper has waited or been silent long
 // enough for a repair to be worth offering.
 func (a *application) wallpaperStalled(now time.Time) bool {
-	return !a.stallSince.IsZero() && now.Sub(a.stallSince) > stallAfter && now.Sub(a.repairedAt) > repairSettle
+	return !a.repairing && !a.stallSince.IsZero() && now.Sub(a.stallSince) > stallAfter && now.Sub(a.repairedAt) > repairSettle
 }
 
 // repairWallpaper restarts WallpaperAgent, at most once while a repair
 // settles, and says so with message.
 func (a *application) repairWallpaper(message string, now time.Time) {
-	if now.Sub(a.repairedAt) < repairSettle {
+	if a.repairing || now.Sub(a.repairedAt) < repairSettle {
 		return
 	}
 	a.repairedAt, a.stallSince = now, time.Time{}

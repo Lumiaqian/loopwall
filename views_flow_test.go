@@ -10,9 +10,9 @@ import (
 )
 
 func TestFirstEnableClosedLoopAndSidebarNavigation(t *testing.T) {
-	restarts, real := 0, restartAgent
-	restartAgent = func() error { restarts++; return nil }
-	t.Cleanup(func() { restartAgent = real })
+	repairs, real := 0, beginWallpaperRepair
+	beginWallpaperRepair = func(*application) { repairs++ }
+	t.Cleanup(func() { beginWallpaperRepair = real })
 
 	// 1. Empty library shows CTA button; empty playlist CTA jumps back to library.
 	a := &application{
@@ -71,7 +71,8 @@ func TestFirstEnableClosedLoopAndSidebarNavigation(t *testing.T) {
 	if err := tt.Click("修复壁纸"); err != nil {
 		t.Fatal(err)
 	}
-	if restarts != 1 {
-		t.Fatalf("restarts = %d, want 1", restarts)
+	a.startWallpaperRepair() // a second entry point cannot restart during verification
+	if repairs != 1 {
+		t.Fatalf("repairs = %d, want 1", repairs)
 	}
 }

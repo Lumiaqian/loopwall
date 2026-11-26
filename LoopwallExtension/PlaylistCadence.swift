@@ -37,6 +37,8 @@ nonisolated enum PlaylistCadence {
         var errors: [String]
         var keepAwakeActive: Bool
         var powerSavingActive = false
+        var displaysAsleep = false
+        var screenLocked = false
     }
 
     static func shouldWriteRuntime(current: RuntimeStructure, written: RuntimeStructure?, lastWrite: Date, now: Date) -> Bool {

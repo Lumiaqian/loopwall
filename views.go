@@ -193,7 +193,7 @@ func (a *application) sidebar(c *ui.Context) {
 			default:
 				repair.Background(t.Warning.Alpha(0.16))
 			}
-			repair.OnClick(func() { a.repairWallpaper("正在重建墙纸服务…", time.Now()) })
+			repair.OnClick(func() { a.startWallpaperRepair() })
 			repair.Children(func() {
 				ui.Icon(c, iconAlert).FontSize(15)
 				ui.Text(c, "修复壁纸").FontSize(12).FontWeight(600).SingleLine()
