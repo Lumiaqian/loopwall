@@ -142,10 +142,16 @@ func main() {
 
 func (app *application) requestLibraryAccess(migrated []string) {
 	expected := app.root
-	message := "请选择扩展原有的 Documents 文件夹：" + expected
+	entry, err := createLibraryShortcut(expected)
+	if err != nil {
+		mygo.RunOnMain(func() { app.finishLibraryLoad(catalog.Config{}, err, migrated) })
+		return
+	}
+	mygo.App.OnQuit(func() { os.Remove(entry); os.Remove(filepath.Dir(entry)) })
+	message := "单击「原壁纸资料库」文件夹，再点「使用原资料库」。"
 	for {
 		paths, err := mygo.Dialog.Open(mygo.OpenDialogOptions{
-			Title: "打开原壁纸资料库", Message: message, DefaultPath: expected,
+			Title: "打开原壁纸资料库", Message: message, DefaultPath: filepath.Dir(entry),
 			Directory: true, ButtonLabel: "使用原资料库",
 		})
 		if err != nil {
@@ -158,7 +164,17 @@ func (app *application) requestLibraryAccess(migrated []string) {
 		}
 		selected, err := selectedLibraryDirectory(expected, paths)
 		if err != nil {
-			message = fmt.Sprintf("%v\n请选择原资料库目录 %s，或取消以退出。", err, expected)
+			result, dialogErr := mygo.Dialog.Message(mygo.MessageOptions{
+				Type: mygo.MessageWarning, Message: "尚未选中原资料库",
+				Detail:  err.Error() + "\n可在 Finder 显示「原壁纸资料库」，将它拖入随后打开的选择窗口，再确认。",
+				Buttons: []string{"在 Finder 显示入口", "取消"}, CancelButton: 1,
+			})
+			if dialogErr != nil || result.Button != 0 {
+				mygo.RunOnMain(func() { mygo.App.Quit() })
+				return
+			}
+			mygo.Shell.ShowItemInFolder(entry)
+			message = "从 Finder 将「原壁纸资料库」拖到此窗口，然后点「使用原资料库」。"
 			continue
 		}
 		config, err := catalog.LoadExisting(selected)
@@ -170,6 +186,21 @@ func (app *application) requestLibraryAccess(migrated []string) {
 		})
 		return
 	}
+}
+
+// The panel can open this directory before the user grants access to the
+// extension container. Creating the link does not read or change the target.
+func createLibraryShortcut(root string) (string, error) {
+	dir, err := os.MkdirTemp("", "Loopwall-")
+	if err != nil {
+		return "", err
+	}
+	entry := filepath.Join(dir, "原壁纸资料库")
+	if err := os.Symlink(root, entry); err != nil {
+		os.Remove(dir)
+		return "", err
+	}
+	return entry, nil
 }
 
 func selectedLibraryDirectory(expected string, paths []string) (string, error) {
