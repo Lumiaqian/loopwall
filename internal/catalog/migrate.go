@@ -25,6 +25,8 @@ func LegacyRoot() string {
 func Migrate(from, root string) (bool, error) {
 	if _, err := os.Stat(filepath.Join(root, "catalog.json")); err == nil {
 		return false, nil // root has its own library
+	} else if !errors.Is(err, fs.ErrNotExist) {
+		return false, err
 	}
 	c, err := Load(from)
 	if err != nil {

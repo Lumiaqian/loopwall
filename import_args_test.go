@@ -64,7 +64,7 @@ func TestSecondInstanceImports(t *testing.T) {
 	// Ready, nothing in the path to import: the result says so.
 	dir := t.TempDir()
 	touch(t, dir, "notes.txt")
-	a = &application{root: t.TempDir(), host: &fakeHost{}, config: catalog.Default()}
+	a = &application{root: t.TempDir(), libraryReady: true, host: &fakeHost{}, config: catalog.Default()}
 	a.secondInstance([]string{"--import", "notes.txt"}, dir)
 	(<-callbacks)()
 	if n, errs := readResult(t, a.root); n != 0 || len(errs) != 1 || !strings.Contains(errs[0], "没有可导入的视频") {
