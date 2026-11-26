@@ -141,3 +141,14 @@ nonisolated enum PlaylistTick {
         return SurfaceDecision(play: play, markApplied: true)
     }
 }
+
+/// Reopen the asset once after a transient track-load failure before rejecting it.
+@MainActor
+func retryRendererCreation<T>(_ load: @MainActor () async throws -> T) async throws -> T {
+    do {
+        return try await load()
+    } catch {
+        try await Task.sleep(for: .milliseconds(250))
+        return try await load()
+    }
+}
