@@ -318,18 +318,16 @@ final class PlaylistController: @unchecked Sendable {
     private func attachRenderer(to key: SurfaceKey, progress: DisplayProgress?) {
         guard let progress, let url = index.url(for: progress.videoID),
               !items(for: progress.displayKey).isEmpty, let surface = SurfaceRegistry.shared.surface(for: key),
-              SurfaceRegistry.shared.claimRendererCreate(for: key) else { return }
+              SurfaceRegistry.shared.claimRendererCreate(for: key, root: surface.rootLayer) else { return }
         let root = SendableBox(value: surface.rootLayer)
         Task {
             do {
                 let renderer = try await VideoRenderer.create(rootLayer: root.value, videoURL: url, position: progress.positionSeconds)
-                guard SurfaceRegistry.shared.surface(for: key) != nil else { renderer.stop(); return }
-                let old = SurfaceRegistry.shared.setRenderer(renderer, videoID: playlistChoiceID, for: key)
-                old?.stop()
+                guard SurfaceRegistry.shared.finishRendererCreate(for: key, root: root.value, renderer: renderer, videoID: playlistChoiceID) else { renderer.stop(); return }
                 await PlaybackStore.shared.follow(renderer, surface: key)
                 await renderer.start()
             } catch {
-                SurfaceRegistry.shared.clearRendererPending(for: key)
+                guard SurfaceRegistry.shared.finishRendererCreate(for: key, root: root.value) else { return }
                 self.mediaFailed(progress.videoID, message: error.localizedDescription)
             }
         }
