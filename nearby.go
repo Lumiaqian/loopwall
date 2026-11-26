@@ -268,6 +268,9 @@ func (a *application) shareSettings(c *ui.Context) {
 					a.setSharing(a.prefs.Share)
 				}
 			})
+			if a.shareSaveError != "" {
+				groupRow(c, "共享设置未保存", a.shareSaveError, func() { glassButton(c, nil, "重试保存", false).OnClick(a.saveShareSettings) })
+			}
 			if s.err != "" {
 				ui.Divider(c)
 				ui.Row(c).Gap(8).AlignItems(ui.Center).Padding(10, 14).FillWidth().TextColor(t.Warning).Children(func() {

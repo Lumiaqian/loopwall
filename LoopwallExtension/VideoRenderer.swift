@@ -160,16 +160,9 @@ final class VideoRenderer: @unchecked Sendable {
         stillImage: CGImage? = nil,
         position: Double = 0,
     ) async throws -> VideoRenderer {
-        let asset = AVURLAsset(url: videoURL)
-        let tracks = try await asset.loadTracks(withMediaType: .video)
-        guard let track = tracks.first else {
-            throw CocoaError(.fileReadCorruptFile, userInfo: [
-                NSLocalizedDescriptionKey: "No video track found in \(videoURL.lastPathComponent)",
-            ])
+        let (asset, track, duration) = try await retryRendererCreation {
+            try await loadCreationTrack(videoURL)
         }
-
-        let duration = try await track.load(.timeRange).duration.seconds
-        guard duration.isFinite, duration > 0 else { throw CocoaError(.fileReadCorruptFile) }
         let displayLayer = AVSampleBufferDisplayLayer()
         displayLayer.videoGravity = .resizeAspectFill
         displayLayer.frame = rootLayer.bounds
@@ -195,6 +188,21 @@ final class VideoRenderer: @unchecked Sendable {
             stillImage: stillImage,
             position: position, duration: duration,
         )
+    }
+
+    @MainActor
+    private static func loadCreationTrack(_ videoURL: URL) async throws -> (AVURLAsset, AVAssetTrack, Double) {
+        let asset = AVURLAsset(url: videoURL)
+        let tracks = try await asset.loadTracks(withMediaType: .video)
+        guard let track = tracks.first else {
+            throw CocoaError(.fileReadCorruptFile, userInfo: [
+                NSLocalizedDescriptionKey: "No video track found in \(videoURL.lastPathComponent)",
+            ])
+        }
+
+        let duration = try await track.load(.timeRange).duration.seconds
+        guard duration.isFinite, duration > 0 else { throw CocoaError(.fileReadCorruptFile) }
+        return (asset, track, duration)
     }
 
     @MainActor

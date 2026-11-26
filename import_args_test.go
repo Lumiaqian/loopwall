@@ -53,6 +53,7 @@ func readResult(t *testing.T, root string) (int, []string) {
 // A second instance carrying --import reaches the running app's import and
 // leaves a result; it does not open a window.
 func TestSecondInstanceImports(t *testing.T) {
+	callbacks := importCallbacks(t)
 	// Not ready: the result says so.
 	a := &application{root: t.TempDir()}
 	a.secondInstance([]string{"--import", "x.mp4"}, "/wd")
@@ -65,6 +66,7 @@ func TestSecondInstanceImports(t *testing.T) {
 	touch(t, dir, "notes.txt")
 	a = &application{root: t.TempDir(), host: &fakeHost{}, config: catalog.Default()}
 	a.secondInstance([]string{"--import", "notes.txt"}, dir)
+	(<-callbacks)()
 	if n, errs := readResult(t, a.root); n != 0 || len(errs) != 1 || !strings.Contains(errs[0], "没有可导入的视频") {
 		t.Fatalf("nothing to import: %d %v", n, errs)
 	}

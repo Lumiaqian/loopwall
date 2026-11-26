@@ -1,10 +1,12 @@
 package main
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
 
+	"github.com/Lumiaqian/loopwall/internal/share"
 	"github.com/egoist/mygo/ui"
 )
 
@@ -133,5 +135,39 @@ func TestMoveFilesReportsFailure(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(from, "settings.json")); err != nil {
 		t.Errorf("the source was lost: %v", err)
+	}
+}
+
+func TestRetrySharedPreferences(t *testing.T) {
+	old := writePrefs
+	defer func() { writePrefs = old }()
+	store, err := share.OpenStore(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	server := share.NewServer(t.TempDir(), store)
+	if _, err := server.Start("127.0.0.1:0"); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = server.Stop() })
+	server.SetLegacy(true)
+	a := application{host: &fakeHost{}, prefs: prefs{Share: true, ShareLegacy: true}, share: &sharing{server: server}}
+	writePrefs = func(p prefs) error { return errors.New("disk full") }
+	a.setLegacyPairing(false)
+	if server.Legacy() {
+		t.Fatal("legacy pairing still active")
+	}
+	a.setSharing(false)
+	if server.Port() != 0 {
+		t.Fatal("server still active")
+	}
+	if a.shareSaveError == "" {
+		t.Fatal("missing persistence warning")
+	}
+	saved := prefs{Share: true, ShareLegacy: true}
+	writePrefs = func(p prefs) error { saved = p; return nil }
+	a.saveShareSettings()
+	if a.shareSaveError != "" || saved.Share || saved.ShareLegacy {
+		t.Fatal("privacy settings retry failed")
 	}
 }

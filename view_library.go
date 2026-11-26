@@ -61,7 +61,10 @@ func (a *application) libraryView(c *ui.Context) {
 	}
 	importLabel := "导入视频"
 	if a.importing {
-		importLabel = "导入中…"
+		importLabel = "正在查找视频…"
+		if a.importTotal > 0 {
+			importLabel = "导入中…"
+		}
 	}
 	importAction := func(c *ui.Context) {
 		glassButton(c, iconImport, importLabel, true).Disabled(a.choosingImport || a.importing).OnClick(a.chooseImport)
