@@ -16,6 +16,7 @@ final class PlaylistController: @unchecked Sendable {
     private var applied: [Int: String] = [:]
     private var timer: (any DispatchSourceTimer)?
     private var tickMilliseconds = PlaylistCadence.presentingTickMilliseconds
+    private var writeBackoff = PlaylistCadence.WriteBackoff()
     private var lastSave = Date.distantPast
     private var lastWritten: PlaylistCadence.RuntimeStructure?
     /// Set by a display reconfiguration; `refreshDisplays` clears it.
@@ -356,6 +357,7 @@ final class PlaylistController: @unchecked Sendable {
     }
 
     private func save() {
+        guard writeBackoff.allowsWrite(at: Date()) else { return }
         SessionPruning.prune(&sessions, active: activeKeys, now: Date().timeIntervalSince1970)
         let structure = runtimeStructure()
         let runtime = RuntimeState(
@@ -373,6 +375,9 @@ final class PlaylistController: @unchecked Sendable {
             try JSONEncoder().encode(runtime).write(to: Self.runtimeURL, options: .atomic)
             lastSave = Date()
             lastWritten = structure
-        } catch { extensionLog("[Playlist] Cannot save progress: \(error)") }
+        } catch {
+            writeBackoff.failed(at: Date())
+            extensionLog("[Playlist] Cannot save progress: \(error)")
+        }
     }
 }

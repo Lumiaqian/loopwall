@@ -394,3 +394,9 @@ require(!replacementClaim.reserve(root: oldRoot, expected: newRoot), "stale task
 require(replacementClaim.reserve(root: newRoot, expected: newRoot), "replacement owns its slot")
 require(!replacementClaim.finish(root: oldRoot), "old completion cannot consume the replacement's slot")
 require(replacementClaim.finish(root: newRoot), "new renderer can still install")
+var backoff = PlaylistCadence.WriteBackoff()
+backoff.failed(at: wroteAt)
+for tick in 0 ..< 100 {
+    require(!backoff.allowsWrite(at: wroteAt.addingTimeInterval(Double(tick) / 10)), "failed writes must wait for a heartbeat")
+}
+require(backoff.allowsWrite(at: wroteAt.addingTimeInterval(10)), "resume writes after one heartbeat")
