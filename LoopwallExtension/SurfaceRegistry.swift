@@ -21,7 +21,7 @@ struct HostedSurface: @unchecked Sendable {
     var scaleFactor: CGFloat
     /// A `VideoRenderer.create` is in flight for this surface. Stops a racing acquire
     /// from building a duplicate renderer on the same root layer.
-    var rendererPending = false
+    var creationClaim = RendererClaim()
 }
 
 /// Owns every hosted surface's resources, keyed by surface. Playback decisions live in
@@ -59,13 +59,11 @@ final class SurfaceRegistry: Sendable {
     /// Claim the right to create this surface's renderer. True only when the surface
     /// has no renderer and no create in flight, in which case a create is marked
     /// pending. This is what keeps racing desktop + preview acquires to one renderer.
-    func claimRendererCreate(for key: SurfaceKey) -> Bool {
+    func claimRendererCreate(for key: SurfaceKey, root: CALayer) -> Bool {
+        let identity = ObjectIdentifier(root)
         let claimed = lock.withLock { contents -> Bool in
-            guard var surface = contents.surfaces[key] else { return false }
-            if surface.renderer != nil || surface.rendererPending {
-                return false
-            }
-            surface.rendererPending = true
+            guard var surface = contents.surfaces[key], surface.renderer == nil,
+                  surface.creationClaim.reserve(root: identity, expected: ObjectIdentifier(surface.rootLayer)) else { return false }
             contents.surfaces[key] = surface
             return true
         }
@@ -73,24 +71,19 @@ final class SurfaceRegistry: Sendable {
         return claimed
     }
 
-    /// Release a create claim without installing a renderer (the create threw).
-    func clearRendererPending(for key: SurfaceKey) {
-        lock.withLock { $0.surfaces[key]?.rendererPending = false }
-    }
-
-    /// Install a surface's renderer, returning the one it replaces for the caller to stop.
-    func setRenderer(_ renderer: VideoRenderer, videoID: String?, for key: SurfaceKey) -> VideoRenderer? {
-        let previous = lock.withLock { contents -> VideoRenderer? in
-            guard var surface = contents.surfaces[key] else { return nil }
-            let previous = surface.renderer
-            surface.renderer = renderer
-            surface.videoID = videoID
-            surface.rendererPending = false
+    /// A completion owns only its original layer tree. Check identity and consume
+    /// the pending claim together so an old completion cannot change a new surface.
+    func finishRendererCreate(for key: SurfaceKey, root: CALayer, renderer: VideoRenderer? = nil, videoID: String? = nil) -> Bool {
+        let identity = ObjectIdentifier(root)
+        return lock.withLock { contents in
+            guard var surface = contents.surfaces[key], surface.creationClaim.finish(root: identity) else { return false }
+            if let renderer {
+                surface.renderer = renderer
+                surface.videoID = videoID
+            }
             contents.surfaces[key] = surface
-            return previous
+            return true
         }
-        traceLog("  [setRenderer] \(key) new=#\(renderer.debugID) replacing=\(previous.map { "#\($0.debugID)" } ?? "nil") videoID=\(videoID ?? "nil")")
-        return previous
     }
 
     /// Record a surface's geometry, returning the surface only when it changed since

@@ -89,3 +89,20 @@ nonisolated enum PlaybackReducer {
         state.surfaces.mapValues { target(for: $0, in: state) }
     }
 }
+
+/// Only the layer tree that reserved creation may consume its pending slot.
+struct RendererClaim {
+    private var owner: ObjectIdentifier?
+
+    mutating func reserve(root: ObjectIdentifier, expected: ObjectIdentifier) -> Bool {
+        guard owner == nil, root == expected else { return false }
+        owner = root
+        return true
+    }
+
+    mutating func finish(root: ObjectIdentifier) -> Bool {
+        guard owner == root else { return false }
+        owner = nil
+        return true
+    }
+}

@@ -386,3 +386,11 @@ do {
 } catch {
     require(creationAttempts == 2, "persistent failures have a bounded retry")
 }
+
+let oldTree = NSObject(), newTree = NSObject()
+let oldRoot = ObjectIdentifier(oldTree), newRoot = ObjectIdentifier(newTree)
+var replacementClaim = RendererClaim()
+require(!replacementClaim.reserve(root: oldRoot, expected: newRoot), "stale task cannot reserve a replacement surface")
+require(replacementClaim.reserve(root: newRoot, expected: newRoot), "replacement owns its slot")
+require(!replacementClaim.finish(root: oldRoot), "old completion cannot consume the replacement's slot")
+require(replacementClaim.finish(root: newRoot), "new renderer can still install")

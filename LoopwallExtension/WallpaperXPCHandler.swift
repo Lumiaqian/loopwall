@@ -319,7 +319,7 @@ final class WallpaperXPCHandler: NSObject, WallpaperExtensionXPCProtocol {
         let choiceConfiguration = creation.choiceConfiguration, renderChoice = creation.renderChoice
         let coldStart = creation.coldStart
         // Claim this surface's single create slot; a racing acquire that lost skips.
-        if SurfaceRegistry.shared.claimRendererCreate(for: key) {
+        if SurfaceRegistry.shared.claimRendererCreate(for: key, root: rootLayer) {
             traceLog("  Setting up VideoRenderer with: \(videoURL.lastPathComponent) (coldStart=\(coldStart))")
             let boxedRoot = SendableBox(value: rootLayer)
             let boxedReply = SendableBox(value: replyObj)
@@ -329,8 +329,9 @@ final class WallpaperXPCHandler: NSObject, WallpaperExtensionXPCProtocol {
                     renderer = try await VideoRenderer.create(rootLayer: boxedRoot.value, videoURL: videoURL, stillImage: cachedStill, position: position)
                 } catch {
                     extensionLog("  [Renderer] Failed to create: \(error)")
-                    SurfaceRegistry.shared.clearRendererPending(for: key)
-                    PlaylistController.shared.mediaFailed(renderChoice, message: error.localizedDescription)
+                    if SurfaceRegistry.shared.finishRendererCreate(for: key, root: boxedRoot.value) {
+                        PlaylistController.shared.mediaFailed(renderChoice, message: error.localizedDescription)
+                    }
                     reply(boxedReply.value, nil) // unblock the acquire regardless
                     return
                 }
@@ -340,20 +341,17 @@ final class WallpaperXPCHandler: NSObject, WallpaperExtensionXPCProtocol {
                     reply(boxedReply.value, nil)
                     traceLog("  [acquire] cold start → replied after still seeded for \(videoURL.lastPathComponent)")
                 }
-                guard SurfaceRegistry.shared.surface(for: key) != nil else {
+                guard SurfaceRegistry.shared.finishRendererCreate(for: key, root: boxedRoot.value, renderer: renderer, videoID: choiceConfiguration) else {
                     renderer.stop(); if !coldStart || cachedStill == nil {
                         reply(boxedReply.value, nil)
                     }; return
                 }
-                let old = SurfaceRegistry.shared.setRenderer(renderer, videoID: choiceConfiguration, for: key)
                 await PlaybackStore.shared.follow(renderer, surface: key)
                 await renderer.start()
-                // Switch: reply once the first frame is composited. Either way, stop the
-                // old renderer once the agent has been told to swap off it.
+                // Switch: reply once the first frame is composited.
                 if !coldStart || cachedStill == nil {
                     reply(boxedReply.value, nil)
                 }
-                old?.stop()
             }
         } else {
             traceLog("  [acquire] renderer create already in flight for \(key) — skipping duplicate (create path)")
@@ -406,7 +404,7 @@ final class WallpaperXPCHandler: NSObject, WallpaperExtensionXPCProtocol {
             // AVSampleBufferDisplayLayer added to a hosted context doesn't composite.
             renderer.play(videoURL, at: position)
             registry.updateVideoID(choiceConfiguration, for: key)
-        } else if registry.claimRendererCreate(for: key) {
+        } else if registry.claimRendererCreate(for: key, root: existing.rootLayer) {
             let boxedRoot = SendableBox(value: existing.rootLayer)
             Task(name: "Attach renderer \(key)") { [boxedRoot, videoURL, cachedStill, position, key, choiceConfiguration] in
                 let renderer: VideoRenderer
@@ -414,13 +412,15 @@ final class WallpaperXPCHandler: NSObject, WallpaperExtensionXPCProtocol {
                     renderer = try await VideoRenderer.create(rootLayer: boxedRoot.value, videoURL: videoURL, stillImage: cachedStill, position: position)
                 } catch {
                     extensionLog("  [Renderer] swap create failed: \(error)")
-                    SurfaceRegistry.shared.clearRendererPending(for: key)
-                    PlaylistController.shared.mediaFailed(renderChoice, message: error.localizedDescription)
+                    if SurfaceRegistry.shared.finishRendererCreate(for: key, root: boxedRoot.value) {
+                        PlaylistController.shared.mediaFailed(renderChoice, message: error.localizedDescription)
+                    }
                     return
                 }
-                guard SurfaceRegistry.shared.surface(for: key) != nil else { renderer.stop(); return }
-                let old = SurfaceRegistry.shared.setRenderer(renderer, videoID: choiceConfiguration, for: key)
-                old?.stop()
+                guard SurfaceRegistry.shared.finishRendererCreate(for: key, root: boxedRoot.value, renderer: renderer, videoID: choiceConfiguration) else {
+                    renderer.stop()
+                    return
+                }
                 await PlaybackStore.shared.follow(renderer, surface: key)
                 await renderer.start()
             }
