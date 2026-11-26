@@ -35,10 +35,13 @@ func (a *application) launchedVersion(current string) bool {
 	if current == "" || current == last {
 		return false
 	}
-	a.prefs.LastVersion = current
-	if err := writePrefs(a.prefs); err != nil {
+	next := a.prefs
+	next.LastVersion = current
+	if err := writePrefs(next); err != nil {
 		a.status = "设置保存失败：" + err.Error()
+		return false
 	}
+	a.prefs = next
 	return last != ""
 }
 
@@ -100,22 +103,25 @@ func extensionBundle() (string, error) {
 // checkExtension registers the extension at each launch unless it is, as a
 // replaced bundle or a hand install can leave it unregistered, and after an
 // update restarts WallpaperAgent, which runs the old extension until then.
-func (a *application) checkExtension(updated bool, version string) {
+func (a *application) checkExtension(version string) {
 	go func() {
 		appex, err := extensionBundle()
 		if err == nil {
 			err = reloadExtension(appex)
 		}
 		mygo.RunOnMain(func() {
-			if updated {
-				a.repairWallpaper("已更新到 "+version+"，正在重新载入壁纸", time.Now())
-			}
-			if err != nil {
-				a.status = "登记壁纸扩展失败：" + err.Error()
-			}
-			a.invalidate()
+			a.finishRegistration(version, err)
 		})
 	}()
+}
+
+func (a *application) finishRegistration(version string, err error) {
+	if err != nil {
+		a.status = "登记壁纸扩展失败：" + err.Error()
+	} else if a.launchedVersion(version) {
+		a.repairWallpaper("已更新到 "+version+"，正在重新载入壁纸", time.Now())
+	}
+	a.invalidate()
 }
 
 // relaunchGuard is the script of /bin/sh that, given the app's pid, its
