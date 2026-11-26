@@ -66,6 +66,8 @@ type Runtime struct {
 	ActiveDisplayKeys []string          `json:"activeDisplayKeys"`
 	OpenVideoIDs      []string          `json:"openVideoIDs"`
 	KeepAwakeActive   bool              `json:"keepAwakeActive"`
+	DisplaysAsleep    bool              `json:"displaysAsleep,omitempty"`
+	ScreenLocked      bool              `json:"screenLocked,omitempty"`
 	// PowerSavingActive is set while the power-saving setting holds playback,
 	// so an empty ActiveDisplayKeys is deliberate rather than a stall.
 	PowerSavingActive bool     `json:"powerSavingActive,omitempty"`

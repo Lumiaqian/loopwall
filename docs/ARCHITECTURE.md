@@ -23,7 +23,7 @@ Go 是资料库和配置的唯一产品写入方，Swift 扩展是进度的唯�
 
 `PlaylistSpec` 保存 `videoIDs`、`advanceMode`（`end` 或 `duration`）、`intervalSeconds`（正整数）、`keepAwakeWhenLockedOnAC`，以及可选的 `powerSaving` 与 `pins`：显示器 UUID → 资料库中的视频 ID。被固定的显示器只循环该视频，其余显示器播放列表；固定的视频无法解码或文件缺失时，该屏退回播放列表而不黑屏。`powerSaving` 为 true 时，用电池、开启低电量模式或热状态达到 serious/critical，所有表面都暂停并停在当前画面，30 秒后原有的深度暂停再释放解码器；扩展用 `NSProcessInfoPowerStateDidChange`、热状态通知和 IOPS 电源通知取得这些条件，仅在条件变化时发出事件，由纯函数 reducer 决定目标。`pins` 与 `powerSaving` 字段可省略，旧配置无需迁移，`schemaVersion` 仍为 1。
 
-`runtime.json` 保存 `schemaVersion`、`appliedRevision`、`updatedAtUnix`、`ruleSignature`、`displays`、`activeDisplayKeys`、`openVideoIDs`、`keepAwakeActive`、可选的 `powerSavingActive`、`errors`。`powerSavingActive` 为 true 表示壁纸被省电模式有意暂停，此时 `activeDisplayKeys` 为空不算卡住，管理端不会提示修复。每个 `DisplayProgress` 保存 `displayKey`、`videoID`、`positionSeconds`、`itemElapsedSeconds`。
+`runtime.json` 保存 `schemaVersion`、`appliedRevision`、`updatedAtUnix`、`ruleSignature`、`displays`、`activeDisplayKeys`、`openVideoIDs`、`keepAwakeActive`、可选的 `powerSavingActive`、`errors`。`powerSavingActive` 为 true 表示壁纸被省电模式有意暂停，此时 `activeDisplayKeys` 为空不算卡住，管理端不会提示修复。扩展也可报告 `displaysAsleep` 和 `screenLocked`，让管理端在手动修复时解释桌面暂停。每个 `DisplayProgress` 保存 `displayKey`、`videoID`、`positionSeconds`、`itemElapsedSeconds`。
 
 Go 通过同目录临时文件、同步并原子 rename 发布配置；扩展通过 `.atomic` 写运行进度。Darwin 通知 `local.lumiaqian.loopwall.libraryChanged` 通知扩展重读，扩展无进程时由下次启动读取。管理端读取运行进度并标明陈旧状态。
 

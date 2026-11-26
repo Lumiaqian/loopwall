@@ -95,6 +95,8 @@ struct RuntimeState: Codable, Sendable {
     var keepAwakeActive = false
     /// Playback is held by the power-saving setting. Absent means not.
     var powerSavingActive: Bool?
+    var displaysAsleep: Bool?
+    var screenLocked: Bool?
     var errors: [String] = []
 }
 

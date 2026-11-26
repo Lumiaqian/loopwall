@@ -70,6 +70,7 @@ type application struct {
 	// Wallpaper recovery (recovery.go).
 	stuckSignals int64     // the extension's calls for help seen so far
 	stallSince   time.Time // when the displays began waiting, or the extension went silent
+	repairing    bool
 	repairedAt   time.Time // when the app last restarted WallpaperAgent
 }
 
@@ -823,7 +824,7 @@ func (a *application) buildTrayMenu() (*mygo.Menu, string) {
 		items = append(items, updater.MenuItem())
 	}
 	items = append(items,
-		&mygo.MenuItem{Label: "修复壁纸（重建墙纸服务）", Click: func(*mygo.MenuItem, *mygo.Window) { a.repairWallpaper("正在重建墙纸服务…", time.Now()) }},
+		&mygo.MenuItem{Label: "修复壁纸（重建墙纸服务）", Click: func(*mygo.MenuItem, *mygo.Window) { a.startWallpaperRepair() }},
 		mygo.Separator(),
 		&mygo.MenuItem{Label: "退出管理端（壁纸继续播放）", Click: func(*mygo.MenuItem, *mygo.Window) { mygo.App.Quit() }},
 	)

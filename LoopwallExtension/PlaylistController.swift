@@ -345,7 +345,8 @@ final class PlaylistController: @unchecked Sendable {
         return lines
     }
     private func runtimeStructure() -> PlaylistCadence.RuntimeStructure {
-        PlaylistCadence.RuntimeStructure(
+        let state = PlaybackStore.snapshot
+        return PlaylistCadence.RuntimeStructure(
             appliedRevision: config.revision,
             activeDisplayKeys: activeKeys.sorted(),
             openVideoIDs: lastOpenIDs.sorted(),
@@ -353,6 +354,8 @@ final class PlaylistController: @unchecked Sendable {
             errors: runtimeErrors(),
             keepAwakeActive: awake.isActive,
             powerSavingActive: powerSavingActive,
+            displaysAsleep: state.displaysAsleep,
+            screenLocked: state.screenLocked,
         )
     }
 
@@ -369,6 +372,8 @@ final class PlaylistController: @unchecked Sendable {
             openVideoIDs: structure.openVideoIDs,
             keepAwakeActive: structure.keepAwakeActive,
             powerSavingActive: structure.powerSavingActive ? true : nil,
+            displaysAsleep: structure.displaysAsleep ? true : nil,
+            screenLocked: structure.screenLocked ? true : nil,
             errors: structure.errors,
         )
         do {
