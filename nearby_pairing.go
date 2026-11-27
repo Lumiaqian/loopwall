@@ -21,10 +21,20 @@ type nearbyIdentity struct {
 
 func (a *application) configureNearby() {
 	s := a.share
-	if s.nearby != nil {
-		if err := s.nearby.Configure(s.store.Device(), s.server.Port() != 0, s.browsing.Load()); err != nil {
-			a.status = err.Error()
+	advertise, discover := s.server.Port() != 0, s.browsing.Load()
+	if s.nearby == nil {
+		if !advertise && !discover {
+			return
 		}
+		var err error
+		s.nearby, err = platform.NewNearby()
+		if err != nil {
+			a.status = err.Error()
+			return
+		}
+	}
+	if err := s.nearby.Configure(s.store.Device(), advertise, discover); err != nil {
+		a.status = err.Error()
 	}
 }
 

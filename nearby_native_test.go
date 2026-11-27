@@ -77,14 +77,6 @@ func runNearbyPeer(t *testing.T, role, other, dir string) {
 		t.Fatal(err)
 	}
 	defer srv.Stop()
-	n, err := platform.NewNearby()
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := n.Configure(store.Device(), true, true); err != nil {
-		t.Fatal(err)
-	}
-	defer n.Configure(store.Device(), false, false)
 	write := func(key string, value []byte) {
 		path := filepath.Join(dir, role+key)
 		if err := os.WriteFile(path+".tmp", value, 0600); err != nil {
@@ -103,11 +95,16 @@ func runNearbyPeer(t *testing.T, role, other, dir string) {
 	}
 	defer host.StopAdvertising()
 	write("peer", []byte(store.Device()))
-	s := &sharing{nearby: n, server: srv, store: store, client: share.NewClient(store, role), name: role, codes: map[string]*string{}, pairing: map[string]bool{}, remotes: map[string]*remote{}}
+	s := &sharing{server: srv, store: store, client: share.NewClient(store, role), name: role, codes: map[string]*string{}, pairing: map[string]bool{}, remotes: map[string]*remote{}}
 	a := &application{share: s}
 	s.seen = map[string]time.Time{}
 	s.thumbs = newLRU[string, *ui.Bitmap](thumbCacheSize)
 	s.browsing.Store(true)
+	a.configureNearby()
+	if s.nearby == nil || a.status != "" {
+		t.Fatalf("activate Nearby: %s", a.status)
+	}
+	defer s.nearby.Configure(store.Device(), false, false)
 	var peer share.Peer
 	tt := ui.NewTester(a.nearbyView, 900, 1100)
 	done := false
