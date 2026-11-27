@@ -12,6 +12,8 @@
 [![Build](https://img.shields.io/github/actions/workflow/status/Lumiaqian/loopwall/build.yml?branch=main&style=flat-square&label=Build)](.github/workflows/build.yml)
 [![Release](https://img.shields.io/github/v/release/Lumiaqian/loopwall?style=flat-square&label=Release)](https://github.com/Lumiaqian/loopwall/releases)
 
+[![Listed on Awesome MyGo](https://awesomemygo.dev/badge.svg)](https://awesomemygo.dev/apps/loopwall)
+
 原生 `LoopwallExtension` 壁纸扩展 · 多主题独立轮播与单屏固定 · APFS 克隆无损导入 · Liquid Glass 界面 · 局域网短码互传 · Ed25519 自动更新
 
 [下载最新版](https://github.com/Lumiaqian/loopwall/releases) · [核心功能](#-核心功能一览) · [操作与数据速查](#-常用操作与数据速查) · [下载与安装](#-下载与安装) · [项目架构](#-项目架构) · [开发与发版](#-本地开发与自动化发版)
