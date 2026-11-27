@@ -248,14 +248,13 @@ type Probe func(context.Context, string, string) (MediaEntry, error)
 func Import(ctx context.Context, root, source string, probe Probe) (MediaEntry, error) {
 	ext := strings.ToLower(filepath.Ext(source))
 	name := strings.TrimSuffix(filepath.Base(source), filepath.Ext(source))
-	return ImportFrom(ctx, root, name, ext, func(w io.Writer) error {
+	return importVideo(ctx, root, name, ext, func(path string) error {
 		in, err := os.Open(source)
 		if err != nil {
 			return err
 		}
 		defer in.Close()
-		_, err = io.Copy(w, in)
-		return err
+		return copyLocal(in, path, cloneLocal)
 	}, probe)
 }
 
@@ -264,6 +263,23 @@ func Import(ctx context.Context, root, source string, probe Probe) (MediaEntry, 
 // probed there, and published only once valid. A download writes into it
 // directly rather than into a copy of its own.
 func ImportFrom(ctx context.Context, root, name, ext string, write func(io.Writer) error, probe Probe) (entry MediaEntry, err error) {
+	return importVideo(ctx, root, name, ext, func(path string) error { return writeVideo(path, write) }, probe)
+}
+
+func writeVideo(path string, write func(io.Writer) error) error {
+	out, err := os.OpenFile(path, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0600)
+	if err != nil {
+		return err
+	}
+	err = write(out)
+	closeErr := out.Close()
+	if err != nil {
+		return err
+	}
+	return closeErr
+}
+
+func importVideo(ctx context.Context, root, name, ext string, write func(string) error, probe Probe) (entry MediaEntry, err error) {
 	ext = strings.ToLower(ext)
 	if !slices.Contains([]string{".mp4", ".mov", ".m4v"}, ext) {
 		return entry, errors.New("仅支持 MP4、MOV 和 M4V")
@@ -277,19 +293,11 @@ func ImportFrom(ctx context.Context, root, name, ext string, write func(io.Write
 		return entry, err
 	}
 	defer os.RemoveAll(stage)
-	out, err := os.Create(filepath.Join(stage, "video"+ext))
-	if err != nil {
-		return entry, err
+	video := filepath.Join(stage, "video"+ext)
+	if err = write(video); err != nil {
+		return
 	}
-	err = write(out)
-	closeErr := out.Close()
-	if err != nil {
-		return entry, err
-	}
-	if closeErr != nil {
-		return entry, closeErr
-	}
-	entry, err = probe(ctx, filepath.Join(stage, "video"+ext), filepath.Join(stage, "thumbnail.jpg"))
+	entry, err = probe(ctx, video, filepath.Join(stage, "thumbnail.jpg"))
 	if err != nil {
 		return
 	}
@@ -308,7 +316,7 @@ func ImportFrom(ctx context.Context, root, name, ext string, write func(io.Write
 	if err = check.Validate(); err != nil {
 		return
 	}
-	err = os.Rename(stage, filepath.Join(base, entry.ID))
+	err = publishVideo(ctx, base, stage, entry)
 	return
 }
 
