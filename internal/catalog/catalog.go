@@ -41,7 +41,15 @@ type PlaylistSpec struct {
 	// serious thermal pressure. Optional and off when absent.
 	PowerSaving bool `json:"powerSaving,omitempty"`
 }
+type Theme struct {
+	Name     string   `json:"name"`
+	VideoIDs []string `json:"videoIDs"`
+}
+
+// The active theme uses Playlist.VideoIDs, the queue consumed by the extension.
 type Config struct {
+	ActiveTheme string  `json:"activeTheme,omitempty"`
+	OtherThemes []Theme `json:"otherThemes,omitempty"`
 	// RemovedMediaIDs records explicit deletions. Unpublished imports are never cleanup candidates.
 	RemovedMediaIDs []string     `json:"removedMediaIDs,omitempty"`
 	SchemaVersion   int          `json:"schemaVersion"`
@@ -89,7 +97,7 @@ func (r Runtime) Fresh(now time.Time) bool {
 }
 
 func Default() Config {
-	return Config{SchemaVersion: 1, Media: []MediaEntry{}, Playlist: PlaylistSpec{VideoIDs: []string{}, AdvanceMode: "end", IntervalSeconds: 60, KeepAwakeWhenLockedOnAC: true}}
+	return Config{ActiveTheme: "默认主题", SchemaVersion: 1, Media: []MediaEntry{}, Playlist: PlaylistSpec{VideoIDs: []string{}, AdvanceMode: "end", IntervalSeconds: 60, KeepAwakeWhenLockedOnAC: true}}
 }
 func Root() string {
 	home, _ := os.UserHomeDir()
@@ -130,12 +138,19 @@ func (c Config) Validate() error {
 		}
 		ids[m.ID] = true
 	}
-	seen := map[string]bool{}
-	for _, id := range c.Playlist.VideoIDs {
-		if !ids[id] || seen[id] {
-			return errors.New("playlist contains missing or duplicate media")
+	names := map[string]bool{}
+	for _, theme := range append([]Theme{{Name: c.ActiveTheme, VideoIDs: c.Playlist.VideoIDs}}, c.OtherThemes...) {
+		if names[theme.Name] || (strings.TrimSpace(theme.Name) == "" && (len(c.OtherThemes) > 0 || theme.Name != "")) {
+			return errors.New("主题名称为空或重复")
 		}
-		seen[id] = true
+		names[theme.Name] = true
+		seen := map[string]bool{}
+		for _, id := range theme.VideoIDs {
+			if !ids[id] || seen[id] {
+				return errors.New("playlist contains missing or duplicate media")
+			}
+			seen[id] = true
+		}
 	}
 	for display, id := range c.Playlist.Pins {
 		if display == "" || !ids[id] {
@@ -342,4 +357,11 @@ func Reap(root string) error {
 		}
 	}
 	return nil
+}
+
+// SwitchTheme exchanges the selected stored list with the active playback queue.
+func (c *Config) SwitchTheme(i int) {
+	next := c.OtherThemes[i]
+	c.OtherThemes[i] = Theme{Name: c.ActiveTheme, VideoIDs: c.Playlist.VideoIDs}
+	c.ActiveTheme, c.Playlist.VideoIDs = next.Name, next.VideoIDs
 }

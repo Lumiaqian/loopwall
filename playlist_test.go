@@ -89,3 +89,45 @@ func TestPlaylistDragReorderAndBatchActions(t *testing.T) {
 		t.Fatalf("after addAll: %v", a.config.Playlist.VideoIDs)
 	}
 }
+
+func TestThemeManagementControls(t *testing.T) {
+	cfg := catalog.Default()
+	cfg.Media = []catalog.MediaEntry{media(idOne), media(idTwo)}
+	cfg.Playlist.VideoIDs = []string{idTwo, idOne}
+	a := &application{root: t.TempDir(), host: &fakeHost{}, config: cfg, section: sectionPlay}
+	tt := ui.NewTester(a.view, 1000, 800)
+	click := func(label string) {
+		t.Helper()
+		tt.Frame()
+		if err := tt.Click(label); err != nil {
+			t.Fatal(err)
+		}
+	}
+	a.themeName = "山景"
+	click("创建并切换")
+	if a.config.ActiveTheme != "山景" || len(a.config.Playlist.VideoIDs) != 0 {
+		t.Fatal("new theme must start empty")
+	}
+	a.togglePlaylist(idOne)
+	a.themeName = "雪山"
+	click("重命名当前主题")
+	if a.config.ActiveTheme != "雪山" || !slices.Equal(a.config.Playlist.VideoIDs, []string{idOne}) {
+		t.Fatal("rename lost current list")
+	}
+	switchTo := func(name string) {
+		t.Helper()
+		click("当前：" + a.config.ActiveTheme)
+		if err := tt.ChooseMenuItem(name); err != nil {
+			t.Fatal(err)
+		}
+		if a.config.ActiveTheme != name {
+			t.Fatalf("selected %q, got %q", name, a.config.ActiveTheme)
+		}
+	}
+	switchTo("默认主题")
+	switchTo("雪山")
+	click("删除当前主题")
+	if a.config.ActiveTheme != "默认主题" || !slices.Equal(cfg.Playlist.VideoIDs, a.config.Playlist.VideoIDs) || len(a.config.OtherThemes) != 0 || len(a.config.Media) != 2 {
+		t.Fatal("delete did not restore previous queue and library")
+	}
+}

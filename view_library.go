@@ -69,7 +69,7 @@ func (a *application) libraryView(c *ui.Context) {
 	importAction := func(c *ui.Context) {
 		glassButton(c, iconImport, importLabel, true).Disabled(a.choosingImport || a.importing).OnClick(a.chooseImport)
 	}
-	pageFrame(c, "资料库", subtitle, func() {
+	pageFrame(c, "资料库", subtitle+" · 当前主题："+a.config.ActiveTheme, func() {
 		if len(a.config.Media) == 0 {
 			return
 		}
