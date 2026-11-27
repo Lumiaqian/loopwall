@@ -400,3 +400,14 @@ for tick in 0 ..< 100 {
     require(!backoff.allowsWrite(at: wroteAt.addingTimeInterval(Double(tick) / 10)), "failed writes must wait for a heartbeat")
 }
 require(backoff.allowsWrite(at: wroteAt.addingTimeInterval(10)), "resume writes after one heartbeat")
+
+for (step, order) in [[1, 0], [0, 1, 2], [1, 0]].enumerated() {
+    let folder = URL(fileURLWithPath: CommandLine.arguments[1]).deletingLastPathComponent()
+    let data = try Data(contentsOf: folder.appendingPathComponent("theme-\(step).json"))
+    let theme = try JSONDecoder().decode(LibraryConfig.self, from: data).validated()
+    let queue = theme.playlist.orderedItems { id in theme.media.first { $0.id == id } }
+    for display in ["display-A", "display-B"] {
+        let playable = theme.playlist.items(for: display, media: theme.media, playlist: queue, usable: { _ in true })
+        require(playable == (display == "display-A" ? [items[2]] : order.map { items[$0] }), "theme switch playback order")
+    }
+}

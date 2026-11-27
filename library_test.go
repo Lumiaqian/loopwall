@@ -98,7 +98,7 @@ func TestLibraryRenameContextMenuSearchAndPlayingBadge(t *testing.T) {
 	tt := ui.NewTester(a.view, 900, 720)
 
 	// Subtitle includes total size, card shows file size and playing badge.
-	if _, ok := tt.Find("2 个视频 · 1 个在轮播中 · 共 1 MB · 原画质，静音播放"); !ok {
+	if _, ok := tt.Find("2 个视频 · 1 个在轮播中 · 共 1 MB · 原画质，静音播放 · 当前主题：默认主题"); !ok {
 		t.Fatal("subtitle missing total file size")
 	}
 	if _, ok := tt.Find("4K · 30 fps · 1 MB"); !ok {

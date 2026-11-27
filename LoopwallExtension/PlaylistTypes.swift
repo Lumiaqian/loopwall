@@ -23,6 +23,10 @@ struct PlaylistSpec: Codable, Equatable, Sendable {
     /// so configurations written before it decode unchanged.
     var pins: [String: String]?
 
+    func orderedItems(_ resolve: (String) -> MediaEntry?) -> [MediaEntry] {
+        videoIDs.compactMap(resolve)
+    }
+
     /// What display `key` plays: its pinned video while that one is usable,
     /// else the playlist, which it falls back to rather than going dark.
     func items(for key: String, media: [MediaEntry], playlist: [MediaEntry], usable: (String) -> Bool) -> [MediaEntry] {

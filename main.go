@@ -47,6 +47,7 @@ type application struct {
 	focus          focusTarget
 	libraryQuery   string
 	libraryFilter  int
+	themeName      string
 	interval       string
 	status         string
 	choosingImport bool
@@ -336,6 +337,10 @@ var saveCatalog = catalog.Save
 func cloneConfig(c catalog.Config) catalog.Config {
 	c.RemovedMediaIDs = slices.Clone(c.RemovedMediaIDs)
 	c.Media = slices.Clone(c.Media)
+	c.OtherThemes = slices.Clone(c.OtherThemes)
+	for i := range c.OtherThemes {
+		c.OtherThemes[i].VideoIDs = slices.Clone(c.OtherThemes[i].VideoIDs)
+	}
 	c.Playlist.VideoIDs = slices.Clone(c.Playlist.VideoIDs)
 	c.Playlist.Pins = maps.Clone(c.Playlist.Pins)
 	return c
@@ -713,6 +718,9 @@ func (a *application) deleteMedia(m catalog.MediaEntry) {
 			if err == nil && r.Button == 1 {
 				saved := a.commit(func(c *catalog.Config) {
 					c.Playlist.VideoIDs = slices.DeleteFunc(c.Playlist.VideoIDs, func(id string) bool { return id == m.ID })
+					for i := range c.OtherThemes {
+						c.OtherThemes[i].VideoIDs = slices.DeleteFunc(c.OtherThemes[i].VideoIDs, func(id string) bool { return id == m.ID })
+					}
 					maps.DeleteFunc(c.Playlist.Pins, func(_, id string) bool { return id == m.ID })
 					c.Media = slices.DeleteFunc(c.Media, func(e catalog.MediaEntry) bool { return e.ID == m.ID })
 					c.RemovedMediaIDs = append(c.RemovedMediaIDs, m.ID)

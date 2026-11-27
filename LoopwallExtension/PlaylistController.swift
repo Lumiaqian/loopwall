@@ -45,7 +45,7 @@ final class PlaylistController: @unchecked Sendable {
     /// Built in `reloadOnQueue` and refreshed by `refreshIndex`; the tick never stats files.
     private var index = MediaIndex()
     private var items: [MediaEntry] {
-        config.playlist.videoIDs.compactMap { id in usable(id) ? index.entry(for: id) : nil }
+        config.playlist.orderedItems { id in usable(id) ? index.entry(for: id) : nil }
     }
     private func usable(_ id: String) -> Bool {
         !rejected.contains(id) && index.url(for: id) != nil

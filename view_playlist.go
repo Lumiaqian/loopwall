@@ -29,6 +29,7 @@ func (a *application) playlistView(c *ui.Context) {
 	}, func(top float32) {
 		scrollBody(c, top, 0, func() {
 			a.repairBanner(c)
+			a.themeControls(c)
 			// Displays.
 			ui.Column(c).Gap(10).FillWidth().Children(func() {
 				sectionTitle(c, iconMonitor, "显示器")
@@ -139,6 +140,42 @@ func (a *application) playlistView(c *ui.Context) {
 						a.orderRow(c, i, len(ids), m)
 					}
 				})
+			})
+		})
+	})
+}
+
+func (a *application) themeControls(c *ui.Context) {
+	sectionTitle(c, iconPlaylist, "轮播主题")
+	ui.Row(c).Wrap().Gap(8).FillWidth().Children(func() {
+		glassButton(c, nil, "当前："+a.config.ActiveTheme, false).Menu(func(menu *ui.Menu) {
+			menu.Item(a.config.ActiveTheme).Radio(true)
+			for i, t := range a.config.OtherThemes {
+				if menu.Item(t.Name).ID("theme-" + t.Name).Chosen() {
+					a.commit(func(cfg *catalog.Config) { cfg.SwitchTheme(i) })
+				}
+			}
+		})
+		ui.TextInput(c, &a.themeName).Width(150).Label("主题名称").Placeholder("输入主题名称")
+		name := strings.TrimSpace(a.themeName)
+		unavailable := name == "" || name == a.config.ActiveTheme || slices.ContainsFunc(a.config.OtherThemes, func(t catalog.Theme) bool { return t.Name == name })
+		glassButton(c, iconPlus, "创建并切换", false).Disabled(unavailable).OnClick(func() {
+			if a.commit(func(cfg *catalog.Config) {
+				cfg.OtherThemes = append(cfg.OtherThemes, catalog.Theme{Name: name, VideoIDs: []string{}})
+				cfg.SwitchTheme(len(cfg.OtherThemes) - 1)
+			}) {
+				a.themeName = ""
+			}
+		})
+		glassButton(c, nil, "重命名当前主题", false).Disabled(unavailable).OnClick(func() {
+			if a.commit(func(cfg *catalog.Config) { cfg.ActiveTheme = name }) {
+				a.themeName = ""
+			}
+		})
+		glassButton(c, nil, "删除当前主题", false).Disabled(len(a.config.OtherThemes) == 0).OnClick(func() {
+			a.commit(func(cfg *catalog.Config) {
+				cfg.SwitchTheme(0)
+				cfg.OtherThemes = slices.Delete(cfg.OtherThemes, 0, 1)
 			})
 		})
 	})

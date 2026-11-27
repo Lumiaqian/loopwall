@@ -4,9 +4,11 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
+	"slices"
 	"testing"
 	"time"
 )
@@ -278,5 +280,38 @@ func TestSaveDropsReapedRemovals(t *testing.T) {
 	}
 	if len(loaded.RemovedMediaIDs) != 1 || loaded.RemovedMediaIDs[0] != pending {
 		t.Fatalf("on disk: %v", loaded.RemovedMediaIDs)
+	}
+}
+
+func TestThemeSwitchAndRestart(t *testing.T) {
+	root := t.TempDir()
+	legacy := fixture(t)
+	if err := AtomicJSON(filepath.Join(root, "catalog.json"), legacy); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := Load(root)
+	if err != nil || cfg.ActiveTheme != "默认主题" || !slices.Equal(cfg.Playlist.VideoIDs, legacy.Playlist.VideoIDs) {
+		t.Fatal(cfg, err)
+	}
+	alternate := []string{cfg.Media[1].ID, cfg.Media[0].ID}
+	cfg.OtherThemes = []Theme{{Name: "夜景", VideoIDs: alternate}}
+	for i, name := range []string{"夜景", "默认主题", "夜景"} {
+		cfg.SwitchTheme(0)
+		if err := Save(root, &cfg); err != nil {
+			t.Fatal(err)
+		}
+		cfg, err = Load(root)
+		want := alternate
+		if i == 1 {
+			want = legacy.Playlist.VideoIDs
+		}
+		if err != nil || cfg.ActiveTheme != name || !slices.Equal(cfg.Playlist.VideoIDs, want) || cfg.Playlist.Pins["display-A"] != legacy.Media[2].ID {
+			t.Fatal(cfg, err)
+		}
+		if path := os.Getenv("GO_CONTRACT_OUTPUT"); path != "" {
+			if err := AtomicJSON(filepath.Join(filepath.Dir(path), fmt.Sprintf("theme-%d.json", i)), cfg); err != nil {
+				t.Fatal(err)
+			}
+		}
 	}
 }
