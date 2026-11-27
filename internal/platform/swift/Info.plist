@@ -2,6 +2,8 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
+    <key>NSBluetoothAlwaysUsageDescription</key>
+    <string>在与附近的 Mac 配对时，Loopwall 的设备发现组件可能访问蓝牙。</string>
     <key>NSLocalNetworkUsageDescription</key>
     <string>在局域网中查找其他 Mac 上共享的视频壁纸，并共享你的资料库。</string>
     <key>NSBonjourServices</key>

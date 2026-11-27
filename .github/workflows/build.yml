@@ -109,6 +109,21 @@ jobs:
           MACOS_SIGNING_IDENTITY: ${{ steps.signing.outputs.identity }}
         run: scripts/build-local.sh
 
+      - name: Check host privacy descriptions
+        run: |
+          python3 - <<'PYTHON'
+          import plistlib
+          from pathlib import Path
+
+          path = Path("dist/darwin-arm64/Loopwall.app/Contents/Info.plist")
+          with path.open("rb") as file:
+              info = plistlib.load(file)
+          for key in ("NSBluetoothAlwaysUsageDescription", "NSLocalNetworkUsageDescription"):
+              value = info.get(key)
+              if not isinstance(value, str) or not value.strip():
+                  raise SystemExit(f"{path}: missing or empty {key}")
+          PYTHON
+
       - name: Package
         id: package
         run: |
