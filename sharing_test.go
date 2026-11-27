@@ -12,7 +12,23 @@ import (
 
 	"github.com/Lumiaqian/loopwall/internal/platform"
 	"github.com/Lumiaqian/loopwall/internal/share"
+	"github.com/egoist/mygo"
 )
+
+func TestSharingOffLeavesNearbyUninitialized(t *testing.T) {
+	mygo.App.SetPath(mygo.PathUserData, t.TempDir())
+	t.Cleanup(func() { mygo.App.SetPath(mygo.PathUserData, "") })
+	a := &application{root: t.TempDir(), host: &fakeHost{}}
+	a.setupSharing()
+	if a.share == nil {
+		t.Fatal(a.status)
+	}
+	a.configureNearby()
+	a.pollNearby()
+	if a.share.nearby != nil || a.share.server.Port() != 0 || a.status != "" {
+		t.Fatalf("idle sharing initialized Nearby or reported an error: %q", a.status)
+	}
+}
 
 func TestFriendly(t *testing.T) {
 	for _, c := range []struct {

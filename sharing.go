@@ -118,7 +118,6 @@ func (a *application) setupSharing() {
 	a.share = &sharing{store: st, server: share.NewServer(a.root, st), client: share.NewClient(st, name), name: name,
 		remotes: map[string]*remote{}, pulls: map[string]*pull{}, codes: map[string]*string{}, pasted: map[string]string{}, seen: map[string]time.Time{}, pairing: map[string]bool{},
 		thumbs: newLRU[string, *ui.Bitmap](thumbCacheSize)}
-	a.share.nearby, _ = platform.NewNearby()
 	a.share.server.SetLegacy(a.prefs.ShareLegacy)
 	if a.prefs.Share {
 		a.startSharing()
